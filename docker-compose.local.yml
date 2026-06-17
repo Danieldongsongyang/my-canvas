@@ -1,0 +1,11 @@
+services:
+  web:
+    image: infinite-canvas:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "3002:3000"
+    restart: unless-stopped
