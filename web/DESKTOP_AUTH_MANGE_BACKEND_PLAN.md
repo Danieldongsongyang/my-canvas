@@ -1,6 +1,6 @@
 # 桌面端登录注册与 mange-backend 接入方案
 
-本文档用于梳理：`infinite-canvas/web` 做成桌面端应用后，首页登录、注册跳转、登录态保存、自动获取 AI relay API Key，以及后续聊天/生图请求接入 `/Users/a1/Desktop/mange-backend` 的推荐实现方案。
+本文档用于梳理：`infinite-canvas/web` 做成桌面端应用后，首页登录、注册跳转、登录态保存、后端代持 AI relay API Key，以及后续聊天/生图请求接入 `/Users/a1/Desktop/mange-backend` 的推荐实现方案。
 
 核心结论：
 
@@ -8,8 +8,9 @@
 2. 用户点击注册链接后，打开 `mange-backend` 的网页注册页。
 3. 注册完成后，用户回到桌面端，使用刚创建的用户名和密码登录。
 4. 桌面端登录使用 `mange-backend` 的登录系统，不再使用当前 `infinite-canvas` 自带 JWT 登录系统。
-5. 登录成功后，桌面端调用 `mange-backend` 的专用初始化接口，自动为当前用户创建或获取一个 `Infinite Canvas Desktop` 专用 relay API Key。
-6. 后续聊天、生图、图文上下文问答请求都用这个 relay API Key 调用 `mange-backend` 的 `/v1/*` relay。
+5. 登录成功后，桌面端调用 `mange-backend` 的专用初始化接口，自动为当前用户创建或确认一个 `Infinite Canvas Desktop` 专用 relay API Key。
+6. relay API Key 只保存在 `mange-backend` 后端，不返回给桌面端前端。
+7. 后续聊天、生图、图文上下文问答请求由前端带登录态请求 `mange-backend` 的用户态 AI 代理接口，后端内部注入 relay API Key 再调用 `/v1/*` relay。
 
 ## 术语说明
 
@@ -29,6 +30,16 @@ relay API Key 才能调用 /v1/* 模型接口。
 ```
 
 不要把当前 `infinite-canvas` 登录 token、`mange-backend` dashboard access token 和 relay API Key 混用。
+
+安全边界必须明确：
+
+```txt
+前端不保存、不读取、不发送真实 relay API Key。
+真实 relay API Key 只存在 mange-backend 后端。
+前端只携带 mange-backend 登录态，请求后端的用户态 AI 代理接口。
+```
+
+这和 Codex、Claude、ChatGPT 这类官方客户端的常见模型类似：客户端每次请求会携带登录态、session、短期 token 或设备 token 来证明用户身份，但不会直接持有可调用模型服务的长期 `sk-...` API Key。真正调用模型服务的凭据由官方后端代持、校验额度后再内部转发。
 
 ## 目标用户流程
 
@@ -121,7 +132,7 @@ New-Api-User: ${user.id}
 
 这是 `mange-backend` 当前 `UserAuth()` 的认证习惯。它会检查 session/access token 中的用户 ID 是否和 `New-Api-User` 一致。
 
-### 3. 登录成功后初始化 relay API Key
+### 3. 登录成功后初始化后端代持 relay API Key
 
 登录成功后，桌面端立即调用一个专用接口：
 
@@ -133,11 +144,11 @@ POST /api/canvas/relay-token
 
 推荐原因：
 
-1. 现有 `POST /api/token/` 创建 token 只返回 `success`，不直接返回新 token 的完整 key。
-2. 现有 `GET /api/token/` 和 `GET /api/token/:id` 会返回打码后的 key。
-3. 获取完整 key 还要再调用 `POST /api/token/:id/key`。
-4. 桌面端不应该关心 token 分页、搜索、打码、批量删除等后台页面逻辑。
-5. 专用接口可以保证幂等：已有则返回，没有则创建。
+1. 现有 token 管理接口面向后台 Key 管理页面，不适合作为桌面端自动初始化协议。
+2. 桌面端不应该关心 token 分页、搜索、打码、批量删除等后台页面逻辑。
+3. 专用接口可以保证幂等：已有则确认可用，没有则创建。
+4. 专用接口可以明确约束：不向前端返回完整 `sk-...` key。
+5. 后续可以在同一接口中返回用户可用模型、默认模型、额度状态等非敏感信息。
 
 推荐接口行为：
 
@@ -145,8 +156,8 @@ POST /api/canvas/relay-token
 1. 使用 UserAuth() 校验当前用户登录态。
 2. 从上下文读取 user id。
 3. 查找该用户是否已有 name = "Infinite Canvas Desktop" 的 token。
-4. 如果已有且可用，返回这个 token 的完整 key。
-5. 如果没有，创建一个新的 token，再返回完整 key。
+4. 如果已有且可用，返回 relay 已准备好的状态，不返回完整 key。
+5. 如果没有，创建一个新的 token，再返回 relay 已准备好的状态，不返回完整 key。
 6. 如果已有但禁用、过期或耗尽，按产品策略返回错误或创建新 token。
 ```
 
@@ -159,9 +170,8 @@ POST /api/canvas/relay-token
   "data": {
     "token_id": 123,
     "token_name": "Infinite Canvas Desktop",
-    "api_key": "sk-xxxx",
-    "base_url": "http://127.0.0.1:8080",
-    "relay_path_prefix": "/v1"
+    "relay_ready": true,
+    "relay_proxy_prefix": "/api/canvas/relay"
   }
 }
 ```
@@ -251,7 +261,35 @@ Authorization: Bearer sk-...
 
 ```txt
 用户登录态不能直接调用 /v1/*。
-桌面端必须先拿到 relay API Key。
+桌面端前端也不应该直接拿到 relay API Key。
+需要由 mange-backend 增加用户态 AI 代理接口，在后端内部用 relay API Key 调用 /v1/*。
+```
+
+推荐新增用户态 AI 代理前缀：
+
+```txt
+/api/canvas/relay/v1/chat/completions
+/api/canvas/relay/v1/images/generations
+/api/canvas/relay/v1/images/edits
+/api/canvas/relay/v1/audio/speech
+```
+
+这些代理接口使用 `UserAuth()`，前端请求只带：
+
+```txt
+Cookie: mange-backend session
+New-Api-User: ${user.id}
+```
+
+后端内部完成：
+
+```txt
+1. 校验用户登录态。
+2. ensure 当前用户存在 Infinite Canvas Desktop token。
+3. 读取该 token 的完整 key。
+4. 内部注入 Authorization: Bearer sk-...
+5. 转发到 mange-backend 现有 /v1/* relay 或复用现有 relay 处理逻辑。
+6. 将响应、错误和流式内容透传给桌面端。
 ```
 
 ## Next 代理路径设计
@@ -285,7 +323,7 @@ ${API_BASE_URL}/api/user/self
 ${API_BASE_URL}/api/canvas/relay-token
 ```
 
-### relay API
+### 用户态 AI relay 代理
 
 前端请求：
 
@@ -296,33 +334,33 @@ ${API_BASE_URL}/api/canvas/relay-token
 /api/v1/audio/speech
 ```
 
-Next 代理到：
+Next 代理到 `mange-backend` 用户态 AI 代理接口：
 
 ```txt
-${API_BASE_URL}/v1/chat/completions
-${API_BASE_URL}/v1/images/generations
-${API_BASE_URL}/v1/images/edits
-${API_BASE_URL}/v1/audio/speech
+${API_BASE_URL}/api/canvas/relay/v1/chat/completions
+${API_BASE_URL}/api/canvas/relay/v1/images/generations
+${API_BASE_URL}/api/canvas/relay/v1/images/edits
+${API_BASE_URL}/api/canvas/relay/v1/audio/speech
 ```
 
 推荐代理规则：
 
 ```txt
 如果 path[0] 是 v1 / v1beta / mj / suno：
-    target = ${API_BASE_URL}/${path...}
+    target = ${API_BASE_URL}/api/canvas/relay/${path...}
 否则：
     target = ${API_BASE_URL}/api/${path...}
 ```
 
-这样浏览器侧仍然只看见 `/api/*`，但后端真实路径可以同时兼容：
+这样浏览器侧仍然只看见 `/api/*`，真实 relay API Key 不出现在前端请求里，后端真实路径可以同时兼容：
 
 ```txt
 /api/user/*
 /api/token/*
-/v1/*
-/v1beta/*
-/mj/*
-/suno/*
+/api/canvas/relay/v1/*
+/api/canvas/relay/v1beta/*
+/api/canvas/relay/mj/*
+/api/canvas/relay/suno/*
 ```
 
 ## 前端认证状态设计
@@ -356,7 +394,7 @@ type DesktopAuthUser = {
 
 type DesktopAuthState = {
     user: DesktopAuthUser | null;
-    relayApiKey: string;
+    relayReady: boolean;
     isReady: boolean;
     isLoading: boolean;
 };
@@ -367,11 +405,11 @@ type DesktopAuthState = {
 | 字段 | 用途 |
 | --- | --- |
 | `user` | 当前 `mange-backend` 登录用户 |
-| `relayApiKey` | 当前用户的 `Infinite Canvas Desktop` 专用 `sk-...` |
+| `relayReady` | 后端是否已为当前用户准备好 `Infinite Canvas Desktop` 专用 relay token |
 | `isReady` | 是否完成本地持久化恢复和登录态检查 |
 | `isLoading` | 是否正在登录、退出或初始化 |
 
-不建议继续叫 `token`，避免和 relay API Key 混淆。
+不建议继续叫 `token`，避免和 `mange-backend` 登录态、dashboard access token、relay API Key 混淆。
 
 ### 本地持久化
 
@@ -381,27 +419,27 @@ type DesktopAuthState = {
 user.id
 user.username
 user.displayName
-relayApiKey
+relayReady
 ```
 
 cookie/session 由 WebView 或系统网络层处理。
 
-如果使用 Tauri/Electron，最终建议把 `relayApiKey` 存入系统安全存储，例如 Keychain/钥匙串/凭据管理器。
+不要把真实 relay API Key 存到 Zustand persist、localforage、localStorage、普通配置文件或前端日志中。
 
-如果第一阶段仍是普通 Next Web 调试，可以先存到 Zustand persist 或 localforage，但文档和 UI 不要把它描述成高安全级别的云端托管。
+如果后续使用 Tauri/Electron 并选择由主进程直接请求模型服务，才考虑把 relay API Key 存入系统安全存储，例如 Keychain/钥匙串/凭据管理器。当前推荐方案是 `mange-backend` 后端代持，前端只保存 `relayReady`。
 
 ### 启动恢复
 
 桌面端启动时建议：
 
 ```txt
-1. 从本地恢复 user 和 relayApiKey。
+1. 从本地恢复 user 和 relayReady。
 2. 如果没有 user，停留在登录页。
 3. 如果有 user，调用 /api/user/self 校验登录态。
 4. 请求 /api/user/self 时带 New-Api-User: user.id。
 5. 如果校验成功，进入应用。
-6. 如果 cookie 已失效，清空 user 和 relayApiKey，回到登录页。
-7. 如果 user 存在但 relayApiKey 为空，重新调用 /api/canvas/relay-token。
+6. 如果 cookie 已失效，清空 user 和 relayReady，回到登录页。
+7. 如果 user 存在但 relayReady 为 false，重新调用 /api/canvas/relay-token。
 ```
 
 如果本地只剩 cookie 但丢失 `user.id`，当前 `mange-backend` 的 `UserAuth()` 不方便直接恢复身份，因为它要求 `New-Api-User`。第一阶段可以直接要求用户重新登录。
@@ -441,10 +479,11 @@ New-Api-User: user.id
 relay API 请求需要：
 
 ```txt
-Authorization: Bearer ${relayApiKey}
+credentials: include
+New-Api-User: user.id
 ```
 
-relay 请求不依赖 cookie，也不需要 `New-Api-User`。
+relay 请求走 `mange-backend` 用户态 AI 代理接口，由后端内部注入 `Authorization: Bearer sk-...`。前端不依赖、不保存、不发送真实 relay API Key。
 
 ## 登录页 UI 逻辑
 
@@ -477,7 +516,7 @@ relay 请求不依赖 cookie，也不需要 `New-Api-User`。
 ```txt
 1. 保存 user。
 2. 调用 /api/canvas/relay-token。
-3. 保存 relayApiKey。
+3. 保存 relayReady。
 4. 进入画布库或默认首页。
 ```
 
@@ -516,20 +555,24 @@ Passkey/OAuth：
 /api/v1/images/edits
 ```
 
-接入桌面端认证后，remote 模式请求头应改为：
+接入桌面端认证后，remote 模式请求不再携带 `Authorization: Bearer sk-...`。
+
+remote 模式请求头应为：
 
 ```txt
-Authorization: Bearer ${relayApiKey}
+credentials: include
+New-Api-User: ${user.id}
 ```
 
-不要继续使用旧的 `useUserStore.getState().token`。
+不要继续使用旧的 `useUserStore.getState().token`，也不要新增 `relayApiKey` 给前端使用。
 
 推荐把 AI 配置逻辑改成：
 
 ```txt
 如果 channelMode = remote：
     URL = /api/v1${path}
-    Authorization = Bearer relayApiKey
+    credentials = include
+    New-Api-User = user.id
 
 如果 channelMode = local：
     URL = buildApiUrl(config.baseUrl, path)
@@ -548,7 +591,7 @@ Authorization: Bearer ${relayApiKey}
 ```txt
 1. 调用 GET /api/user/logout。
 2. 清空本地 user。
-3. 清空本地 relayApiKey。
+3. 清空本地 relayReady。
 4. 清空或重置 AI remote 状态。
 5. 回到登录页。
 ```
@@ -612,8 +655,8 @@ func EnsureCanvasRelayToken(c *gin.Context) {
         common.ApiSuccess(c, gin.H{
             "token_id": token.Id,
             "token_name": token.Name,
-            "api_key": "sk-" + token.GetFullKey(),
-            "relay_path_prefix": "/v1",
+            "relay_ready": true,
+            "relay_proxy_prefix": "/api/canvas/relay",
         })
         return
     }
@@ -645,13 +688,15 @@ func EnsureCanvasRelayToken(c *gin.Context) {
     common.ApiSuccess(c, gin.H{
         "token_id": token.Id,
         "token_name": token.Name,
-        "api_key": "sk-" + token.GetFullKey(),
-        "relay_path_prefix": "/v1",
+        "relay_ready": true,
+        "relay_proxy_prefix": "/api/canvas/relay",
     })
 }
 ```
 
 实际实现时要以 `mange-backend` 现有 `model.Token`、`common.GenerateKey()`、`common.ApiSuccess()` 写法为准。
+
+注意：`token.GetFullKey()` 只允许在 `mange-backend` 内部调用，用于后端代理请求现有 `/v1/*` relay。不要把完整 key 放进接口响应、前端 store、浏览器存储或日志。
 
 ### 额度策略
 
@@ -665,7 +710,7 @@ func EnsureCanvasRelayToken(c *gin.Context) {
 方案 C：如果用户已有后台 token，则复用专用 token，不额外创建。
 ```
 
-第一阶段建议后端统一决定，前端只消费返回的 `api_key`。
+第一阶段建议后端统一决定，前端只消费返回的 `relay_ready` 和非敏感状态。
 
 ### 幂等策略
 
@@ -763,12 +808,12 @@ Turnstile 校验失败
 处理逻辑：
 
 ```txt
-1. 清空 relayApiKey。
+1. 清空 relayReady。
 2. 尝试重新调用 /api/canvas/relay-token。
 3. 如果仍失败，提示用户重新登录。
 ```
 
-不要把 401/403 简单提示为 OpenAI API Key 错误，因为这里的 key 是 `mange-backend` 签发的 relay key。
+不要把 401/403 简单提示为 OpenAI API Key 错误，因为这里的 key 是 `mange-backend` 后端代持的 relay key，前端并不知道完整 key。
 
 ### cookie 失效
 
@@ -776,7 +821,7 @@ Turnstile 校验失败
 
 ```txt
 1. 清空 user。
-2. 清空 relayApiKey。
+2. 清空 relayReady。
 3. 回到登录页。
 ```
 
@@ -787,7 +832,7 @@ Turnstile 校验失败
 目标：
 
 ```txt
-桌面端可登录 mange-backend，自动拿到 relay key，并能用聊天/生图接口。
+桌面端可登录 mange-backend，后端自动准备 relay key，前端不接触真实 key，并能用聊天/生图接口。
 ```
 
 改动：
@@ -795,13 +840,14 @@ Turnstile 校验失败
 ```txt
 mange-backend:
 新增 POST /api/canvas/relay-token
+新增 /api/canvas/relay/* 用户态 AI 代理
 
 infinite-canvas/web:
-修改 Next /api/[...path] 代理，支持 relay 路径分流
+修改 Next /api/[...path] 代理，把 /api/v1/* 分流到 mange-backend /api/canvas/relay/v1/*
 修改 auth service 和 user store，接入 /api/user/login
 新增登录页注册链接，打开 mange-backend /register
-AI remote 请求使用 relayApiKey
-退出登录清理 user 和 relayApiKey
+AI remote 请求使用登录态和 New-Api-User，不使用 relayApiKey
+退出登录清理 user 和 relayReady
 ```
 
 暂不做：
@@ -825,7 +871,6 @@ OAuth 回调
 支持打开账号中心
 支持查看额度和用量
 支持 token 失效自动重建
-支持系统安全存储 relayApiKey
 ```
 
 ### 第三阶段：桌面端安全和设备管理
@@ -833,11 +878,12 @@ OAuth 回调
 可补：
 
 ```txt
-每台设备独立 token
+每台设备独立后端 relay token
 设备名称管理
 退出并撤销本机 token
 后台展示设备来源
 敏感操作二次确认
+如果改成桌面主进程直连 relay，再评估系统安全存储 relayApiKey
 ```
 
 ## 建议文件改动清单
@@ -860,8 +906,8 @@ web/src/components/layout/app-config-modal.tsx
 
 1. `route.ts` 负责代理分流。
 2. `auth.ts` 负责 `mange-backend` 登录、登出、自我信息、初始化 relay token。
-3. `use-user-store.ts` 负责保存用户和 relay key。
-4. `image.ts`、`audio.ts`、`video.ts` 负责 remote 模式使用 relay key。
+3. `use-user-store.ts` 负责保存用户和 relayReady。
+4. `image.ts`、`audio.ts`、`video.ts` 负责 remote 模式使用登录态调用用户态 AI 代理。
 5. `login/page.tsx` 负责桌面端登录页和注册链接。
 6. `client-root-init.tsx` 和 `app-config-modal.tsx` 需要检查是否仍保留旧的 URL 导入 API Key 逻辑，避免和桌面端自动 key 冲突。
 
@@ -871,13 +917,15 @@ web/src/components/layout/app-config-modal.tsx
 router/api-router.go
 controller/canvas.go 或 controller/infinite_canvas.go
 model/token.go
+relay 代理相关 controller 或 service
 ```
 
 其中：
 
 1. `api-router.go` 注册 `/api/canvas/relay-token`。
-2. 新 controller 负责 ensure relay token。
-3. 如现有 model 缺少按用户和名称查 token 的方法，可在 `model/token.go` 增加小函数。
+2. `api-router.go` 注册 `/api/canvas/relay/*` 用户态 AI 代理。
+3. 新 controller 负责 ensure relay token。
+4. 如现有 model 缺少按用户和名称查 token 的方法，可在 `model/token.go` 增加小函数。
 
 ## 验收标准
 
@@ -885,13 +933,13 @@ model/token.go
 2. 点击“注册账号”能打开 `mange-backend` 的 `/register` 页面。
 3. 用户在网页端注册完成后，能回桌面端用用户名密码登录。
 4. 登录成功后，桌面端能保存用户信息。
-5. 登录成功后，桌面端会自动调用 `/api/canvas/relay-token` 并保存返回的 `sk-...`。
+5. 登录成功后，桌面端会自动调用 `/api/canvas/relay-token` 并保存 `relayReady`，接口不返回完整 `sk-...`。
 6. 刷新或重启桌面端后，如果 session 仍有效，能继续进入应用。
-7. session 失效后，桌面端回到登录页，并清空本地 relay key。
-8. 聊天请求从前端发到 `/api/v1/chat/completions`，Next 实际转发到 `mange-backend /v1/chat/completions`。
-9. 生图请求从前端发到 `/api/v1/images/generations`，Next 实际转发到 `mange-backend /v1/images/generations`。
-10. relay 请求头使用 `Authorization: Bearer sk-...`，不再使用旧登录 token。
-11. 退出登录后，桌面端清空用户信息和 relay key。
+7. session 失效后，桌面端回到登录页，并清空本地 `relayReady`。
+8. 聊天请求从前端发到 `/api/v1/chat/completions`，Next 实际转发到 `mange-backend /api/canvas/relay/v1/chat/completions`。
+9. 生图请求从前端发到 `/api/v1/images/generations`，Next 实际转发到 `mange-backend /api/canvas/relay/v1/images/generations`。
+10. relay 请求头使用登录态和 `New-Api-User`，前端请求中不出现 `Authorization: Bearer sk-...`。
+11. 退出登录后，桌面端清空用户信息和 `relayReady`。
 12. `mange-backend` 后台能看到当前用户名下的 `Infinite Canvas Desktop` token。
 
 ## 不做事项
@@ -920,9 +968,9 @@ remote 模式使用旧登录 token，不一定能通过 mange-backend TokenAuth(
 
 ```txt
 1. Next 代理继续保留前端 /api/* 软约定。
-2. 代理层把 /api/v1/* 转发到 mange-backend /v1/*。
-3. 登录后自动获取 mange-backend relay API Key。
-4. remote 模式 AI 请求统一使用该 relay API Key。
+2. 代理层把 /api/v1/* 转发到 mange-backend /api/canvas/relay/v1/*。
+3. 登录后自动确保 mange-backend 已为当前用户准备 relay API Key。
+4. remote 模式 AI 请求统一使用登录态调用用户态 AI 代理，由后端内部代持并注入 relay API Key。
 ```
 
 这样聊天窗口、画布助手、生图、图生图、音频和视频接口都可以共享同一套认证与 relay 接入逻辑。
