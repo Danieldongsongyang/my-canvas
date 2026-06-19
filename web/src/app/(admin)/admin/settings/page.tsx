@@ -200,7 +200,10 @@ export default function AdminSettingsPage() {
     };
 
     const fetchChannelModelList = async () => {
-        if (!token) return;
+        if (!token) {
+            message.warning("请先登录后再拉取模型列表");
+            return;
+        }
         const channel = channelForm.getFieldsValue();
         if (!channel?.baseUrl) {
             message.warning("请先填写接口地址");

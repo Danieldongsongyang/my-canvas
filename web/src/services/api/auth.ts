@@ -64,6 +64,11 @@ export async function fetchCurrentUser(userId?: string | number) {
     return normalizeMangeUser(user);
 }
 
+export async function fetchMangeUserModels(userId?: string | number) {
+    const models = await mangeRequest<string[]>("/api/user/models", { method: "GET" }, userId);
+    return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
 export async function ensureCanvasRelayToken(userId?: string | number) {
     const response = await fetch("/api/canvas/relay-token", {
         method: "POST",

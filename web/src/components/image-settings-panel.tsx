@@ -32,7 +32,7 @@ const aspectOptions = [
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "size", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;

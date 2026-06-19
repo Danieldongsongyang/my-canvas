@@ -97,8 +97,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 config={config}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
-                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
-                                onMissingConfig={() => openConfigDialog(true)}
+                                onConfigChange={(key, value) => onConfigChange(node.id, { [key]: value })}
                                 onOpenChange={onImageSettingsOpenChange}
                             />
                             <CanvasComposerToggle theme={theme} icon={<Camera className="size-3.5" />} label="摄影机控制" active={Boolean(node.metadata?.cameraControl)} onClick={() => onConfigChange(node.id, { cameraControl: !node.metadata?.cameraControl })} />
@@ -207,7 +206,7 @@ function CanvasComposerCount({ theme, value, onChange }: { theme: (typeof canvas
             <button
                 ref={buttonRef}
                 type="button"
-                className="inline-flex h-10 w-[92px] items-center justify-between rounded-xl border px-3 text-sm font-semibold transition hover:opacity-80"
+                className="inline-flex h-10 w-[72px] items-center justify-between rounded-xl border px-3 text-sm font-semibold transition hover:opacity-80"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 onClick={() => setOpen((value) => !value)}
             >
@@ -233,8 +232,8 @@ function CanvasComposerCountMenu({
     onChange: (count: number) => void;
     onClose: () => void;
 }) {
-    const width = 92;
-    const margin = 12;
+    const width = 72;
+    const margin = 8;
     const left = Math.max(margin, Math.min(window.innerWidth - width - margin, buttonRect.left));
     const style = {
         position: "fixed",
@@ -259,7 +258,7 @@ function CanvasComposerCountMenu({
                 <button
                     key={option}
                     type="button"
-                    className="flex h-14 w-full items-center justify-center rounded-2xl text-lg font-semibold transition hover:opacity-80"
+                    className="flex h-8 w-full items-center justify-center rounded-2xl text-lg font-semibold transition hover:opacity-80"
                     style={{ background: option === count ? theme.toolbar.activeBg : "transparent", color: theme.node.text }}
                     onClick={() => {
                         onChange(option);

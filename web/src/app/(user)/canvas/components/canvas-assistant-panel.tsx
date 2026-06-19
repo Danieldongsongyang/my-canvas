@@ -24,6 +24,7 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 
 type AssistantMode = "ask" | "image";
+type AssistantComposerConfigKey = "imageModel" | "textModel" | "quality" | "size";
 const PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = PANEL_MOTION_MS / 1000;
 
@@ -327,7 +328,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                         onModeChange={setMode}
                         onPromptChange={setPrompt}
                         onSubmit={submit}
-                        onConfigChange={(key, value) => updateConfig(key === "count" ? "canvasImageCount" : key, value)}
+                        onConfigChange={updateConfig}
                         onMissingConfig={() => openConfigDialog(true)}
                         onRemoveReference={(id) => {
                             setRemovedReferenceIds((prev) => new Set(prev).add(id));
@@ -389,7 +390,7 @@ function AssistantComposer({
     onModeChange: (mode: AssistantMode) => void;
     onPromptChange: (prompt: string) => void;
     onSubmit: () => void;
-    onConfigChange: (key: keyof AiConfig, value: string) => void;
+    onConfigChange: (key: AssistantComposerConfigKey, value: string) => void;
     onMissingConfig: () => void;
     onRemoveReference: (id: string) => void;
     onPasteImage: (file: File) => void;
@@ -434,7 +435,7 @@ function AssistantComposer({
                         {mode === "image" ? (
                             <>
                                 <ModelPicker className="h-8 shrink-0" config={config} value={config.imageModel || config.model} onChange={(model) => onConfigChange("imageModel", model)} capability="image" onMissingConfig={onMissingConfig} />
-                                <CanvasImageSettingsPopover config={config} placement="topRight" getPopupContainer={() => document.body} buttonClassName="canvas-composer-settings canvas-composer-icon !h-8 !min-w-8 !rounded-full !px-2" onConfigChange={onConfigChange} onMissingConfig={onMissingConfig} />
+                                <CanvasImageSettingsPopover config={config} placement="topRight" buttonClassName="canvas-composer-settings canvas-composer-icon !h-8 !min-w-8 !rounded-full !px-2" onConfigChange={onConfigChange} />
                             </>
                         ) : (
                             <ModelPicker className="h-8 shrink-0" config={config} value={config.textModel || config.model} onChange={(model) => onConfigChange("textModel", model)} capability="text" onMissingConfig={onMissingConfig} />

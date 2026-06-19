@@ -5,11 +5,12 @@ import { Cloud, RefreshCw, Wifi } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
-import { fetchImageModels } from "@/services/api/image";
+import { fetchMangeUserModels } from "@/services/api/auth";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { filterModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -68,6 +69,7 @@ export function AppConfigModal() {
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const publicSettings = useConfigStore((state) => state.publicSettings);
+    const userId = useUserStore((state) => state.user?.id || state.token);
     const effectiveConfig = useEffectiveConfig();
     const modelChannel = publicSettings?.modelChannel;
     const allowCustomChannel = modelChannel?.allowCustomChannel === true;
@@ -87,13 +89,14 @@ export function AppConfigModal() {
 
     const refreshModels = async () => {
         if (effectiveMode === "remote") return;
-        if (!config.baseUrl.trim() || !config.apiKey.trim()) {
-            message.error("请先填写 Base URL 和 API Key");
+        if (!userId) {
+            message.error("请先登录后再拉取后端可用模型");
             return;
         }
         setLoadingModels(true);
         try {
-            const models = await fetchImageModels(config);
+            const models = await fetchMangeUserModels(userId);
+            if (!models.length) message.warning("后端没有返回可用模型，请检查渠道管理和用户分组");
             const imageModels = filterModelsByCapability(models, "image");
             const videoModels = filterModelsByCapability(models, "video");
             const textModels = filterModelsByCapability(models, "text");
@@ -224,7 +227,7 @@ export function AppConfigModal() {
                             <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-stone-200 px-3 py-2 dark:border-stone-800">
                                 <div className="min-w-0">
                                     <div className="text-sm font-medium">模型列表</div>
-                                    <div className="mt-1 text-xs text-stone-500">当前已保存 {config.models.length} 个模型</div>
+                                    <div className="mt-1 text-xs text-stone-500">当前已保存 {config.models.length} 个模型，拉取时读取后端当前用户可用模型</div>
                                 </div>
                                 <Button size="small" loading={loadingModels} onClick={() => void refreshModels()}>
                                     拉取模型列表
