@@ -1,11 +1,13 @@
 import { useCallback, useRef } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, Dispatch, MutableRefObject, SetStateAction } from "react";
+import { nanoid } from "nanoid";
 
 import { uploadMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
+import type { AiConfig } from "@/stores/use-config-store";
 
-import { NODE_DEFAULT_SIZE } from "../../constants";
-import { CanvasNodeType, type CanvasNodeData, type Position } from "../../types";
+import { NODE_DEFAULT_SIZE, getNodeSpec } from "../../constants";
+import { CanvasNodeType, type CanvasConnection, type CanvasImageWorkflowAction, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "../../types";
 import { audioMetadata, isAudioFile, imageMetadata, videoMetadata, VIDEO_NODE_MAX_HEIGHT, VIDEO_NODE_MAX_WIDTH } from "../canvas-page-utils";
 import { fitNodeSize } from "../../utils/canvas-node-size";
 
@@ -14,10 +16,14 @@ type UseCanvasFileNodesParams = {
     containerRef: MutableRefObject<HTMLDivElement | null>;
     screenToCanvas: (clientX: number, clientY: number) => Position;
     size: { width: number; height: number };
+    nodesRef: MutableRefObject<CanvasNodeData[]>;
+    connectionsRef: MutableRefObject<CanvasConnection[]>;
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
+    setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
     setSelectedConnectionId: Dispatch<SetStateAction<string | null>>;
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
+    effectiveConfig: AiConfig;
     message: {
         success: (content: string) => void;
     };
@@ -28,13 +34,17 @@ export function useCanvasFileNodes({
     containerRef,
     screenToCanvas,
     size,
+    nodesRef,
+    connectionsRef,
     setNodes,
+    setConnections,
     setSelectedNodeIds,
     setSelectedConnectionId,
     setDialogNodeId,
+    effectiveConfig,
     message,
 }: UseCanvasFileNodesParams) {
-    const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
+    const uploadTargetRef = useRef<{ nodeId?: string; position?: Position; workflow?: CanvasImageWorkflowAction } | null>(null);
 
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
         const image = await uploadImage(file);
@@ -97,8 +107,8 @@ export function useCanvasFileNodes({
         setSelectedConnectionId(null);
     }, [setNodes, setSelectedConnectionId, setSelectedNodeIds]);
 
-    const handleUploadRequest = useCallback((nodeId?: string, position?: Position) => {
-        uploadTargetRef.current = { nodeId, position };
+    const handleUploadRequest = useCallback((nodeId?: string, position?: Position, workflow?: CanvasImageWorkflowAction) => {
+        uploadTargetRef.current = { nodeId, position, workflow };
         imageInputRef.current?.click();
     }, [imageInputRef]);
 
@@ -107,6 +117,27 @@ export function useCanvasFileNodes({
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
+
+            if (target?.workflow) {
+                if (!file.type.startsWith("image/")) {
+                    uploadTargetRef.current = null;
+                    event.target.value = "";
+                    return;
+                }
+                await createWorkflowFromFile(file, { ...target, workflow: target.workflow }, {
+                    nodesRef,
+                    connectionsRef,
+                    setNodes,
+                    setConnections,
+                    setSelectedNodeIds,
+                    setSelectedConnectionId,
+                    setDialogNodeId,
+                    effectiveConfig,
+                });
+                uploadTargetRef.current = null;
+                event.target.value = "";
+                return;
+            }
 
             if (target?.nodeId) {
                 if (isAudioFile(file)) {
@@ -202,7 +233,7 @@ export function useCanvasFileNodes({
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [containerRef, createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds, size.height, size.width],
+        [connectionsRef, containerRef, createAudioFileNode, createImageFileNode, createVideoFileNode, effectiveConfig, nodesRef, screenToCanvas, setConnections, setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds, size.height, size.width],
     );
 
     const handleDrop = useCallback(
@@ -236,4 +267,115 @@ export function useCanvasFileNodes({
         handleDrop,
         pasteAssistantImage,
     };
+}
+
+async function createWorkflowFromFile(
+    file: File,
+    target: { nodeId?: string; position?: Position; workflow: CanvasImageWorkflowAction },
+    deps: {
+        nodesRef: MutableRefObject<CanvasNodeData[]>;
+        connectionsRef: MutableRefObject<CanvasConnection[]>;
+        setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
+        setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
+        setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
+        setSelectedConnectionId: Dispatch<SetStateAction<string | null>>;
+        setDialogNodeId: Dispatch<SetStateAction<string | null>>;
+        effectiveConfig: AiConfig;
+    },
+) {
+    if (!target.nodeId) return;
+    const currentNode = deps.nodesRef.current.find((node) => node.id === target.nodeId);
+    if (!currentNode) return;
+
+    const image = await uploadImage(file);
+    const imageSize = fitNodeSize(image.width, image.height);
+    const sourceNode: CanvasNodeData = {
+        ...currentNode,
+        type: CanvasNodeType.Image,
+        title: file.name,
+        width: imageSize.width,
+        height: imageSize.height,
+        metadata: cleanFilledImageMetadata(currentNode.metadata, imageMetadata(image)),
+    };
+    const taskType = target.workflow === "image-to-video" || target.workflow === "first-frame-video" ? CanvasNodeType.Video : CanvasNodeType.Image;
+    const taskNode = createWorkflowTaskNode(taskType, sourceNode, target.workflow, deps.effectiveConfig);
+    const nextNodes = deps.nodesRef.current.map((node) => (node.id === sourceNode.id ? sourceNode : node)).concat(taskNode);
+    const nextConnections = deps.connectionsRef.current.concat({ id: nanoid(), fromNodeId: sourceNode.id, toNodeId: taskNode.id });
+
+    deps.nodesRef.current = nextNodes;
+    deps.connectionsRef.current = nextConnections;
+    deps.setNodes(nextNodes);
+    deps.setConnections(nextConnections);
+    deps.setSelectedNodeIds(new Set([taskNode.id]));
+    deps.setSelectedConnectionId(null);
+    deps.setDialogNodeId(taskNode.id);
+}
+
+function createWorkflowTaskNode(type: CanvasNodeType.Image | CanvasNodeType.Video, sourceNode: CanvasNodeData, workflow: CanvasImageWorkflowAction, config: AiConfig): CanvasNodeData {
+    const spec = getNodeSpec(type);
+    const metadata: CanvasNodeMetadata =
+        type === CanvasNodeType.Video
+            ? {
+                  content: "",
+                  status: "idle",
+                  prompt: "",
+                  model: config.videoModel || config.model,
+                  size: config.size,
+                  seconds: config.videoSeconds,
+                  vquality: config.vquality,
+                  generateAudio: config.videoGenerateAudio,
+                  watermark: config.videoWatermark,
+              }
+            : {
+                  content: "",
+                  status: "idle",
+                  prompt: "",
+                  model: config.imageModel || config.model,
+                  size: config.size,
+                  quality: config.quality,
+                  count: getGenerationCount(config.canvasImageCount || config.count),
+              };
+
+    return {
+        id: `${type}-${Date.now()}-${nanoid(6)}`,
+        type,
+        title: workflowTitle(workflow, spec.title),
+        position: { x: sourceNode.position.x + sourceNode.width + 96, y: sourceNode.position.y + sourceNode.height / 2 - spec.height / 2 },
+        width: spec.width,
+        height: spec.height,
+        metadata: { ...spec.metadata, ...metadata },
+    };
+}
+
+function cleanFilledImageMetadata(current: CanvasNodeMetadata | undefined, image: CanvasNodeMetadata): CanvasNodeMetadata {
+    return {
+        ...current,
+        ...image,
+        errorDetails: undefined,
+        freeResize: false,
+        isBatchRoot: undefined,
+        batchRootId: undefined,
+        batchChildIds: undefined,
+        batchUsesReferenceImages: undefined,
+        generationType: undefined,
+        model: undefined,
+        size: undefined,
+        quality: undefined,
+        count: undefined,
+        references: undefined,
+        primaryImageId: undefined,
+        imageBatchExpanded: undefined,
+    };
+}
+
+function workflowTitle(workflow: CanvasImageWorkflowAction, fallback: string) {
+    if (workflow === "image-to-image") return "图生图";
+    if (workflow === "image-to-video") return "图生视频";
+    if (workflow === "image-background") return "图片换背景";
+    if (workflow === "first-frame-video") return "首帧图生视频";
+    return fallback;
+}
+
+function getGenerationCount(count: string) {
+    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }

@@ -33,8 +33,9 @@ async function proxy(request: NextRequest, context: RouteContext) {
     const relayApiBaseUrl = process.env.MANGE_BACKEND_API_URL || apiBaseUrl;
     const encodedPath = path.map(encodeURIComponent).join("/");
     const isCanvasRelay = path[0] === "canvas";
+    const isMangeBackendApi = isCanvasRelay || path[0] === "user";
     const targetPath = relayPrefixes.has(path[0]) ? `/${encodedPath}` : `/api/${encodedPath}`;
-    const targetBaseUrl = relayPrefixes.has(path[0]) || isCanvasRelay ? relayApiBaseUrl : apiBaseUrl;
+    const targetBaseUrl = relayPrefixes.has(path[0]) || isMangeBackendApi ? relayApiBaseUrl : apiBaseUrl;
     const resolvedTargetPath = isCanvasRelay ? `/api/${encodedPath}` : targetPath;
     const target = `${targetBaseUrl.replace(/\/$/, "")}${resolvedTargetPath}${request.nextUrl.search}`;
     const hasBody = request.method !== "GET" && request.method !== "HEAD";

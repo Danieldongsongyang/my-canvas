@@ -8,7 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
+import { CanvasNodeType, type CanvasImageWorkflowAction, type CanvasNodeData, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -27,6 +27,7 @@ type CanvasNodeProps = {
     showImageInfo: boolean;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
+    hasReferenceInputs?: boolean;
     renderPanel?: (node: CanvasNodeData) => ReactNode;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     batchCount?: number;
@@ -50,6 +51,7 @@ type CanvasNodeProps = {
     onTextToVideo?: (node: CanvasNodeData) => void;
     onImageToImage?: (node: CanvasNodeData) => void;
     onImageToVideo?: (node: CanvasNodeData) => void;
+    onImageWorkflow?: (node: CanvasNodeData, action: CanvasImageWorkflowAction) => void;
     onUploadImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
@@ -70,6 +72,7 @@ type NodeContentRendererProps = {
     onContentChange: (nodeId: string, content: string) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
+    hasReferenceInputs: boolean;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onWriteTextContent?: (node: CanvasNodeData) => void;
@@ -77,6 +80,7 @@ type NodeContentRendererProps = {
     onTextToVideo?: (node: CanvasNodeData) => void;
     onImageToImage?: (node: CanvasNodeData) => void;
     onImageToVideo?: (node: CanvasNodeData) => void;
+    onImageWorkflow?: (node: CanvasNodeData, action: CanvasImageWorkflowAction) => void;
     onUploadImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
@@ -95,6 +99,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     showImageInfo,
     resourceLabel,
     mentionReferences = [],
+    hasReferenceInputs = false,
     renderPanel,
     renderNodeContent,
     batchCount = 0,
@@ -118,6 +123,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onTextToVideo,
     onImageToImage,
     onImageToVideo,
+    onImageWorkflow,
     onUploadImage,
     onViewImage,
     onContextMenu,
@@ -132,6 +138,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
+    const panelWidth = data.type === CanvasNodeType.Image ? 920 : 500;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const resizeRef = useRef({
         isResizing: false,
@@ -326,6 +333,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         batchRecovering={batchRecovering}
                         renderNodeContent={renderNodeContent}
                         mentionReferences={mentionReferences}
+                        hasReferenceInputs={hasReferenceInputs}
                         onContentChange={onContentChange}
                         onStopEditing={() => setIsEditingContent(false)}
                         onRetry={onRetry}
@@ -335,6 +343,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onTextToVideo={onTextToVideo}
                         onImageToImage={onImageToImage}
                         onImageToVideo={onImageToVideo}
+                        onImageWorkflow={onImageWorkflow}
                         onUploadImage={onUploadImage}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
                         onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
@@ -355,7 +364,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] max-w-[calc(100vw-48px)] -translate-x-1/2 pt-4" style={{ width: panelWidth }}>{renderPanel(data)}</div> : null}
         </div>
     );
 });
@@ -556,49 +565,47 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ node, theme, isSelected, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onUploadImage, onImageToImage, onImageToVideo }: NodeContentRendererProps) {
-    const content = !isSelected ? (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-7 px-5" style={{ color: theme.node.placeholder }}>
-            <button
-                type="button"
-                className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl px-6 text-xl font-semibold leading-none transition hover:scale-[1.02]"
-                style={{ background: theme.toolbar.activeBg, color: theme.node.text }}
-                aria-label="上传图片"
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onUploadImage?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-            >
-                <Upload className="size-6 shrink-0" />
-                <span>Upload</span>
-            </button>
-            <ImageIcon className="size-16 opacity-35" strokeWidth={1.5} />
+function EmptyImageContent({ node, theme, isSelected, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, hasReferenceInputs, onToggleBatch, onUploadImage, onImageWorkflow }: NodeContentRendererProps) {
+    const content = hasReferenceInputs ? (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-8 text-center" style={{ color: theme.node.placeholder }}>
+            <ImageIcon className="size-12 opacity-35" strokeWidth={1.8} />
+            <div className="space-y-2">
+                <div className="text-base font-semibold" style={{ color: theme.node.text }}>
+                    已连接参考图片
+                </div>
+                <div className="text-sm">选中节点后在下方配置并生成</div>
+            </div>
         </div>
     ) : (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-5" style={{ color: theme.node.placeholder }}>
-            <button
-                type="button"
-                className="grid size-14 place-items-center self-center rounded-2xl p-0 leading-none transition hover:scale-[1.02]"
-                style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}
-                aria-label="上传图片"
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onUploadImage?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-            >
-                <Upload className="block size-5 opacity-45" />
-            </button>
-            <span className="-mt-2 text-center text-xs font-medium tracking-[0.18em] opacity-70">上传</span>
-            <div className="w-full space-y-1">
-                <div className="px-1 text-xs font-medium" style={{ color: theme.node.placeholder }}>
-                    试试：
+        <div className="flex h-full w-full flex-col justify-center gap-5 px-8 py-7" style={{ color: theme.node.placeholder }}>
+
+            {isSelected ? (
+                <button
+                    type="button"
+                    className="absolute left-1/2 top-0 inline-flex -translate-x-1/2 -translate-y-[calc(100%+16px)] items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold transition hover:scale-[1.02]"
+                    style={{ color: theme.node.text }}
+                    aria-label="上传图片"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onUploadImage?.(node);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <Upload className="size-4 shrink-0" />
+                    <span>上传</span>
+                </button>
+            ) : null}
+            <div className="space-y-3 pl-7">
+                <div className="text-sm font-semibold" style={{ color: theme.node.placeholder }}>
+                    尝试：
                 </div>
-                <ImageWorkflowActionItem icon={<Images className="size-4" />} label="图生图" theme={theme} onClick={() => onImageToImage?.(node)} />
-                <ImageWorkflowActionItem icon={<Video className="size-4" />} label="图生视频" theme={theme} onClick={() => onImageToVideo?.(node)} />
+                <div className="space-y-2">
+                    <ImageWorkflowActionItem icon={<Images className="size-4" />} label="图生图" theme={theme} onClick={() => onImageWorkflow?.(node, "image-to-image")} />
+                    <ImageWorkflowActionItem icon={<Video className="size-4" />} label="图生视频" theme={theme} onClick={() => onImageWorkflow?.(node, "image-to-video")} />
+                    <ImageWorkflowActionItem icon={<Pencil className="size-4" />} label="图片换背景" theme={theme} onClick={() => onImageWorkflow?.(node, "image-background")} />
+                    <ImageWorkflowActionItem icon={<Images className="size-4" />} label="首帧图生视频" theme={theme} onClick={() => onImageWorkflow?.(node, "first-frame-video")} />
+                </div>
             </div>
         </div>
     );

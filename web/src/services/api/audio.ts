@@ -1,24 +1,25 @@
 import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
+import { userAuthHeaders } from "@/services/api/auth";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+    return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
 }
 
-function relayApiKey() {
-    const key = useUserStore.getState().relayApiKey;
-    if (!key) throw new Error("请先登录并初始化云端 Relay API Key");
-    return key;
+function relayUserId() {
+    const { user, relayReady } = useUserStore.getState();
+    if (!user?.id || !relayReady) throw new Error("请先登录并初始化云端 Relay");
+    return user.id;
 }
 
 function aiHeaders(config: AiConfig) {
     return config.channelMode === "remote"
         ? {
-              Authorization: `Bearer ${relayApiKey()}`,
+              ...userAuthHeaders(relayUserId()),
               "Content-Type": "application/json",
           }
         : {
@@ -48,7 +49,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string): 
                 speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
                 ...(instructions ? { instructions } : {}),
             },
-            { headers: aiHeaders(config), responseType: "blob" },
+            { headers: aiHeaders(config), responseType: "blob", withCredentials: true },
         );
         await assertAudioBlob(response.data);
         refreshRemoteUser(config);

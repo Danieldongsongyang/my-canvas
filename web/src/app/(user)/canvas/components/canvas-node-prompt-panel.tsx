@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUp, LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { ArrowUp, Camera, ChevronDown, LoaderCircle, PanelsTopLeft, Plus } from "lucide-react";
 import { Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -18,6 +19,8 @@ import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
+
+const canvasComposerCountOptions = [1, 2, 4];
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
@@ -43,6 +46,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
     const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
     const canSubmit = Boolean(prompt.trim() || canGenerateFromConnectedInputs);
+    const imageReferences = mentionReferences.filter((item) => item.kind === "image" && item.active);
 
     useEffect(() => {
         setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
@@ -72,6 +76,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
+            {mode === "image" && imageReferences.length ? <ReferenceStrip references={imageReferences} theme={theme} /> : null}
             <CanvasResourceMentionTextarea
                 value={prompt}
                 references={mentionReferences}
@@ -83,7 +88,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             />
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="thin-scrollbar flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>
@@ -96,6 +101,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
                             />
+                            <CanvasComposerToggle theme={theme} icon={<Camera className="size-3.5" />} label="摄影机控制" active={Boolean(node.metadata?.cameraControl)} onClick={() => onConfigChange(node.id, { cameraControl: !node.metadata?.cameraControl })} />
+                            <CanvasComposerToggle theme={theme} icon={<PanelsTopLeft className="size-3.5" />} label="全景图" active={Boolean(node.metadata?.panorama)} onClick={() => onConfigChange(node.id, { panorama: !node.metadata?.panorama })} />
+                            <CanvasComposerCount theme={theme} value={config.count} onChange={(count) => onConfigChange(node.id, { count })} />
                         </>
                     ) : mode === "video" ? (
                         <>
@@ -131,12 +139,148 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     );
 }
 
+function ReferenceStrip({ references, theme }: { references: CanvasResourceReference[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    return (
+        <div className="mb-3 flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
+            {references.map((reference, index) => (
+                <div key={reference.nodeId} className="flex h-24 w-[76px] shrink-0 flex-col overflow-hidden rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
+                    <div className="relative h-[72px] flex-1 bg-white">
+                        {reference.previewUrl ? <img src={reference.previewUrl} alt={reference.title} className="h-full w-full object-contain" /> : null}
+                        <div className="absolute left-0 bottom-0 right-0 px-2 py-1 text-[11px] font-semibold" style={{ background: `${theme.toolbar.panel}cc`, color: theme.node.text }}>{`图片${index + 1}`}</div>
+                    </div>
+                    <div className="truncate px-2 py-1.5 text-[11px] opacity-80">{reference.title}</div>
+                </div>
+            ))}
+            <div className="flex h-24 w-[76px] shrink-0 items-center justify-center rounded-xl border border-dashed opacity-70" style={{ borderColor: theme.node.stroke }}>
+                <Plus className="size-5" />
+            </div>
+        </div>
+    );
+}
+
+function CanvasComposerToggle({ theme, icon, label, active, onClick }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; icon: ReactNode; label: string; active?: boolean; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition hover:opacity-80"
+            style={{ background: active ? theme.toolbar.activeBg : "transparent", borderColor: active ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={onClick}
+        >
+            {icon}
+            <span>{label}</span>
+        </button>
+    );
+}
+
+function CanvasComposerCount({ theme, value, onChange }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; value: string; onChange: (count: number) => void }) {
+    const [open, setOpen] = useState(false);
+    const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const count = normalizeCanvasComposerCount(value);
+
+    useEffect(() => {
+        if (!open) return;
+        const syncPosition = () => setButtonRect(buttonRef.current?.getBoundingClientRect() || null);
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            if (buttonRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+            setOpen(false);
+        };
+
+        syncPosition();
+        window.addEventListener("resize", syncPosition);
+        window.addEventListener("scroll", syncPosition, true);
+        window.addEventListener("pointerdown", closeOnOutsidePointer, true);
+        return () => {
+            window.removeEventListener("resize", syncPosition);
+            window.removeEventListener("scroll", syncPosition, true);
+            window.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+        };
+    }, [open]);
+
+    return (
+        <div className="relative shrink-0" onMouseDown={(event) => event.stopPropagation()}>
+            {open && buttonRect ? <CanvasComposerCountMenu buttonRect={buttonRect} panelRef={panelRef} theme={theme} count={count} onChange={onChange} onClose={() => setOpen(false)} /> : null}
+            <button
+                ref={buttonRef}
+                type="button"
+                className="inline-flex h-10 w-[92px] items-center justify-between rounded-xl border px-3 text-sm font-semibold transition hover:opacity-80"
+                style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
+                onClick={() => setOpen((value) => !value)}
+            >
+                <span>{count}x</span>
+                <ChevronDown className={`size-4 opacity-60 transition ${open ? "rotate-180" : ""}`} />
+            </button>
+        </div>
+    );
+}
+
+function CanvasComposerCountMenu({
+    buttonRect,
+    panelRef,
+    theme,
+    count,
+    onChange,
+    onClose,
+}: {
+    buttonRect: DOMRect;
+    panelRef: RefObject<HTMLDivElement | null>;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    count: number;
+    onChange: (count: number) => void;
+    onClose: () => void;
+}) {
+    const width = 92;
+    const margin = 12;
+    const left = Math.max(margin, Math.min(window.innerWidth - width - margin, buttonRect.left));
+    const style = {
+        position: "fixed",
+        zIndex: 1300,
+        left,
+        bottom: window.innerHeight - buttonRect.top + 8,
+        width,
+        background: theme.toolbar.panel,
+        borderColor: theme.toolbar.border,
+    } as const;
+
+    return createPortal(
+        <div
+            ref={panelRef}
+            className="overflow-hidden rounded-[22px] border p-1.5 shadow-xl backdrop-blur"
+            style={style}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+        >
+            {canvasComposerCountOptions.map((option) => (
+                <button
+                    key={option}
+                    type="button"
+                    className="flex h-14 w-full items-center justify-center rounded-2xl text-lg font-semibold transition hover:opacity-80"
+                    style={{ background: option === count ? theme.toolbar.activeBg : "transparent", color: theme.node.text }}
+                    onClick={() => {
+                        onChange(option);
+                        onClose();
+                    }}
+                >
+                    {option}x
+                </button>
+            ))}
+        </div>,
+        document.body,
+    );
+}
+
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
 }
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
+    const count = node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count;
     return {
         ...globalConfig,
         model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
@@ -150,8 +294,13 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
-        count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
+        count: String(mode === "image" ? normalizeCanvasComposerCount(count) : count),
     };
+}
+
+function normalizeCanvasComposerCount(value: string | number) {
+    const count = Math.floor(Math.abs(Number(value)) || 1);
+    return canvasComposerCountOptions.includes(count) ? count : 1;
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {

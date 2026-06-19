@@ -683,10 +683,14 @@ function InfiniteCanvasPage() {
         containerRef,
         screenToCanvas,
         size,
+        nodesRef,
+        connectionsRef,
         setNodes,
+        setConnections,
         setSelectedNodeIds,
         setSelectedConnectionId,
         setDialogNodeId,
+        effectiveConfig,
         message,
     });
 
@@ -1149,6 +1153,7 @@ function InfiniteCanvasPage() {
                             showImageInfo={showImageInfo}
                             resourceLabel={resourceReferenceByNodeId.get(node.id)}
                             mentionReferences={mentionReferencesByNodeId.get(node.id) || []}
+                            hasReferenceInputs={Boolean(generationInputsById.get(node.id)?.some((input) => input.type === "image"))}
                             renderPanel={(panelNode) =>
                                 panelNode.type === CanvasNodeType.Config ? (
                                     <CanvasConfigComposer
@@ -1208,6 +1213,7 @@ function InfiniteCanvasPage() {
                             onTextToVideo={handleTextToVideo}
                             onImageToImage={handleImageToImage}
                             onImageToVideo={handleImageToVideo}
+                            onImageWorkflow={(node, action) => handleUploadRequest(node.id, { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 }, action)}
                             onUploadImage={(node) => handleUploadRequest(node.id)}
                             onViewImage={(node) => setPreviewNodeId(node.id)}
                             onContextMenu={(event, id) => {

@@ -10,6 +10,8 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
+const canvasImageCountOptions = [1, 2, 4];
+
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
@@ -28,7 +30,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
     const quality = config.quality || "auto";
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const count = normalizeCanvasImageCount(config.count);
     const activeSize = config.size || "auto";
     const updateOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
@@ -58,7 +60,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [onOpenChange, open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={{ ...config, count: String(count) }} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -123,4 +125,9 @@ function ImageSettingsPortal({
         </div>,
         document.body,
     );
+}
+
+function normalizeCanvasImageCount(value: string | number) {
+    const count = Math.floor(Math.abs(Number(value)) || 1);
+    return canvasImageCountOptions.includes(count) ? count : 1;
 }

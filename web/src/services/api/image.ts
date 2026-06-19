@@ -1,5 +1,6 @@
 import axios from "axios";
 
+import { userAuthHeaders } from "@/services/api/auth";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
@@ -169,19 +170,19 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+    return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
 }
 
-function relayApiKey() {
-    const key = useUserStore.getState().relayApiKey;
-    if (!key) throw new Error("请先登录并初始化云端 Relay API Key");
-    return key;
+function relayUserId() {
+    const { user, relayReady } = useUserStore.getState();
+    if (!user?.id || !relayReady) throw new Error("请先登录并初始化云端 Relay");
+    return user.id;
 }
 
 function aiHeaders(config: AiConfig, contentType?: string) {
     return config.channelMode === "remote"
         ? {
-              Authorization: `Bearer ${relayApiKey()}`,
+              ...userAuthHeaders(relayUserId()),
               ...(contentType ? { "Content-Type": contentType } : {}),
           }
         : {
@@ -217,6 +218,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
             },
             {
                 headers: aiHeaders(config, "application/json"),
+                withCredentials: true,
             },
         );
         const images = parseImagePayload(response.data);
@@ -249,7 +251,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config) });
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config), withCredentials: true });
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
@@ -276,6 +278,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
                     ...aiHeaders(config, "application/json"),
                 } as Record<string, string>,
                 responseType: "text",
+                withCredentials: true,
                 onDownloadProgress: (event) => {
                     const responseText = String(event.event?.target?.responseText || "");
                     const nextText = responseText.slice(processedLength);

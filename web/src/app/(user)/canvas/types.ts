@@ -27,6 +27,7 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasImageWorkflowAction = "image-to-image" | "image-to-video" | "image-background" | "first-frame-video";
 export type CanvasTextMode = "menu" | "editing";
 
 export type CanvasNodeMetadata = {
@@ -44,6 +45,8 @@ export type CanvasNodeMetadata = {
     size?: string;
     quality?: string;
     count?: number;
+    cameraControl?: boolean;
+    panorama?: boolean;
     seconds?: string;
     vquality?: string;
     generateAudio?: string;

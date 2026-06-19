@@ -61,6 +61,7 @@ async function apiRequest<T>(config: { url: string; method: "GET" | "POST" | "DE
             paramsSerializer: { serialize: (params) => serializeApiParams(params as ApiParams).toString() },
             data: config.data,
             headers: config.headers,
+            withCredentials: true,
             validateStatus: () => true,
         });
     } catch {
