@@ -9,7 +9,6 @@ import { saveAs } from "file-saver";
 import { DOCS_URL } from "@/constant/env";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { uploadImage } from "@/services/image-storage";
-import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
@@ -17,7 +16,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { fitNodeSize } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal } from "antd";
-import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
+import { NODE_DEFAULT_SIZE } from "../constants";
 import { ActiveConnectionPath, ConnectionPath } from "../components/canvas-connections";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
@@ -40,7 +39,6 @@ import { CanvasLeftMenu } from "../components/canvas-left-menu";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
-import { useCanvasConnections } from "./hooks/use-canvas-connections";
 import { useImageNodeHandlers } from "../hooks/use-image-node-handlers";
 import { useTextNodeHandlers } from "../hooks/use-text-node-handlers";
 import { useCanvasStore } from "../stores/use-canvas-store";
@@ -49,10 +47,8 @@ import {
     CanvasNodeType,
     type CanvasAssistantImage,
     type CanvasAssistantSession,
-    type CanvasConnection,
     type CanvasNodeData,
     type Position,
-    type SelectionBox,
 } from "../types";
 import type { PendingConnectionCreate } from "./canvas-page-types";
 import {
@@ -69,18 +65,11 @@ import {
     isHiddenBatchChild,
     isHiddenBatchConnectionEndpoint,
 } from "./canvas-page-utils";
-import { useLatestCanvasRefs } from "./hooks/use-latest-canvas-refs";
-import { useCanvasViewport } from "./hooks/use-canvas-viewport";
-import { useCanvasHistory } from "./hooks/use-canvas-history";
-import { useCanvasSelectionDrag } from "./hooks/use-canvas-selection-drag";
-import { useCanvasGroups } from "./hooks/use-canvas-groups";
-import { useCanvasClipboard } from "./hooks/use-canvas-clipboard";
 import { useCanvasKeyboardShortcuts } from "./hooks/use-canvas-keyboard-shortcuts";
-import { useCanvasFileNodes } from "./hooks/use-canvas-file-nodes";
 import { useCanvasGeneration } from "./hooks/use-canvas-generation";
 import { useCanvasImageActions } from "./hooks/use-canvas-image-actions";
 import { useCanvasPanels } from "./hooks/use-canvas-panels";
-import { useCanvasProjectPersistence, useCanvasProjectState } from "./hooks/use-canvas-project-state";
+import { useCanvasWorkspaceSession } from "./workspace-session";
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
@@ -200,7 +189,6 @@ function InfiniteCanvasPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -214,27 +202,6 @@ function InfiniteCanvasPage() {
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const {
-        nodes,
-        setNodes,
-        connections,
-        setConnections,
-        groups,
-        setGroups,
-        chatSessions,
-        setChatSessions,
-        activeChatId,
-        setActiveChatId,
-        backgroundMode,
-        setBackgroundMode,
-        showImageInfo,
-        setShowImageInfo,
-        projectLoaded,
-        setProjectLoaded,
-    } = useCanvasProjectState();
-    const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
-    const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-    const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [editRequestNonce, setEditRequestNonce] = useState(0);
     const {
@@ -289,7 +256,32 @@ function InfiniteCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
 
+    const handleProjectMissing = useCallback(() => {
+        router.replace("/canvas");
+    }, [router]);
+
     const {
+        nodes,
+        setNodes,
+        connections,
+        setConnections,
+        groups,
+        setGroups,
+        chatSessions,
+        setChatSessions,
+        activeChatId,
+        setActiveChatId,
+        backgroundMode,
+        setBackgroundMode,
+        showImageInfo,
+        setShowImageInfo,
+        projectLoaded,
+        selectedNodeIds,
+        setSelectedNodeIds,
+        hoveredNodeId,
+        setHoveredNodeId,
+        selectionBox,
+        setSelectionBox,
         viewport,
         setViewport,
         size,
@@ -298,31 +290,9 @@ function InfiniteCanvasPage() {
         visibleNodes,
         resetViewport: resetViewportState,
         setZoomScale: setZoomScaleState,
-    } = useCanvasViewport({
-        containerRef,
-        nodes,
-        collapsingBatchIds,
-    });
-
-    const { nodesRef, connectionsRef, selectedNodeIdsRef, viewportRef, selectionBoxRef } = useLatestCanvasRefs({
-        nodes,
-        connections,
-        groups,
-        selectedNodeIds,
-        viewport,
-        selectionBox,
-    });
-
-    const configNodeMetadata = useMemo(
-        () => ({
-            model: effectiveConfig.imageModel || effectiveConfig.model,
-            size: effectiveConfig.size,
-            count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
-        }),
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size],
-    );
-
-    const {
+        nodesRef,
+        connectionsRef,
+        selectedNodeIdsRef,
         selectedConnectionId,
         setSelectedConnectionId,
         connectingParams,
@@ -332,118 +302,59 @@ function InfiniteCanvasPage() {
         cancelPendingConnectionCreate,
         createConnectedNode,
         deleteConnection,
-        finishConnectionDrag,
         handleConnectStart,
         openConnectionContextMenu,
         selectConnection,
-        updateConnectionDrag,
         setConnecting,
-    } = useCanvasConnections({
-        nodesRef,
-        connectionsRef,
-        viewportRef,
-        screenToCanvas,
-        configNodeMetadata,
-        setNodes,
-        setConnections,
-        setSelectedNodeIds,
-        setContextMenu,
-        setAddNodesMenu,
-        setDialogNodeId,
-        message,
-    });
-
-    const { historyRef, lastHistoryRef, historyPausedRef, historyState, resetHistory, undoCanvas, redoCanvas } = useCanvasHistory({
-        projectLoaded,
-        nodes,
-        connections,
-        groups,
-        chatSessions,
-        activeChatId,
-        backgroundMode,
-        showImageInfo,
-        setNodes,
-        setConnections,
-        setGroups,
-        setChatSessions,
-        setActiveChatId,
-        setBackgroundMode,
-        setShowImageInfo,
-        setSelectedNodeIds,
-        setSelectedConnectionId,
-        setContextMenu,
-    });
-
-    const { isNodeDragging, nodeDraggingRef, handleCanvasMouseDown, handleNodeMouseDown, startBoundingBoxDrag } = useCanvasSelectionDrag({
-        nodesRef,
-        selectedNodeIdsRef,
-        viewportRef,
-        selectionBoxRef,
-        historyPausedRef,
-        pendingConnectionCreate,
-        screenToCanvas,
-        cancelPendingConnectionCreate,
-        finishConnectionDrag,
-        updateConnectionDrag,
-        setNodes,
-        setSelectedNodeIds,
-        setSelectedConnectionId,
-        setSelectionBox,
-        setContextMenu,
-        setAddNodesMenu,
-        setHoveredNodeId,
-        setToolbarNodeId,
-        setDialogNodeId,
-        setEditingNodeId,
-    });
-
-    const { getCommonGroup, groupSelectedNodes, ungroupNodes, renameGroup, sortGroupNodes } = useCanvasGroups({
-        nodes,
-        groups,
-        nodesRef,
-        selectedNodeIdsRef,
-        setNodes,
-        setGroups,
-    });
-
-    const cleanupCanvasFiles = useCallback(
-        (extra?: unknown) => {
-            cleanupAssetImages({ extra, history: historyRef.current, lastHistory: lastHistoryRef.current });
+        historyState,
+        undoCanvas,
+        redoCanvas,
+        isNodeDragging,
+        nodeDraggingRef,
+        handleCanvasMouseDown,
+        handleNodeMouseDown,
+        startBoundingBoxDrag,
+        getCommonGroup,
+        groupSelectedNodes,
+        ungroupNodes,
+        renameGroup,
+        sortGroupNodes,
+        cleanupCanvasFiles,
+        handleUploadRequest,
+        handleImageInputChange,
+        handleDrop,
+        pasteAssistantImage,
+        copyNodesToClipboard,
+        copySelectedNodes,
+        pasteCopiedNodes,
+        pasteSystemClipboard,
+    } = useCanvasWorkspaceSession({
+        project: {
+            hydrated,
+            projectId,
+            openProject,
+            updateProject,
+            onProjectMissing: handleProjectMissing,
         },
-        [cleanupAssetImages, historyRef, lastHistoryRef],
-    );
-
-    const handleProjectMissing = useCallback(() => {
-        router.replace("/canvas");
-    }, [router]);
-
-    useCanvasProjectPersistence({
-        hydrated,
-        projectId,
-        openProject,
-        updateProject,
-        onProjectMissing: handleProjectMissing,
-        setViewport,
-        viewport,
-        viewportRef,
-        historyPausedRef,
-        resetHistory,
-        nodes,
-        setNodes,
-        connections,
-        setConnections,
-        groups,
-        setGroups,
-        chatSessions,
-        setChatSessions,
-        activeChatId,
-        setActiveChatId,
-        backgroundMode,
-        setBackgroundMode,
-        showImageInfo,
-        setShowImageInfo,
-        projectLoaded,
-        setProjectLoaded,
+        canvas: {
+            containerRef,
+            imageInputRef,
+            collapsingBatchIds,
+        },
+        config: {
+            effectiveConfig,
+        },
+        panels: {
+            setContextMenu,
+            setAddNodesMenu,
+            setToolbarNodeId,
+            setDialogNodeId,
+            setEditingNodeId,
+        },
+        files: {
+            cleanupAssetImages,
+        },
+        message,
     });
 
     const keepNodeToolbar = useCallback(
@@ -677,38 +588,6 @@ function InfiniteCanvasPage() {
         cleanupAssetImages();
         router.push("/canvas");
     }, [cleanupAssetImages, deleteProjects, projectId, router]);
-
-    const { createImageFileNode, handleUploadRequest, handleImageInputChange, handleDrop, pasteAssistantImage } = useCanvasFileNodes({
-        imageInputRef,
-        containerRef,
-        screenToCanvas,
-        size,
-        nodesRef,
-        connectionsRef,
-        setNodes,
-        setConnections,
-        setSelectedNodeIds,
-        setSelectedConnectionId,
-        setDialogNodeId,
-        effectiveConfig,
-        message,
-    });
-
-    const { copyNodesToClipboard, copySelectedNodes, pasteCopiedNodes, pasteSystemClipboard } = useCanvasClipboard({
-        nodesRef,
-        connectionsRef,
-        selectedNodeIdsRef,
-        getCanvasCenter,
-        createImageFileNode,
-        setNodes,
-        setConnections,
-        setSelectedNodeIds,
-        setSelectedConnectionId,
-        setContextMenu,
-        setAddNodesMenu,
-        setDialogNodeId,
-        message,
-    });
 
     useCanvasKeyboardShortcuts({
         nodesRef,

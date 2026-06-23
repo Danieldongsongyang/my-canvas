@@ -19,16 +19,6 @@
 - 补充时写成明确、可执行的规则，避免只写模糊描述。
 - 新规则应放到最相关的章节；找不到合适章节时放到“项目注意事项”。
 
-## 后端规范
-
-- 后端使用 Go + Gin + GORM。
-- `handler/` 只处理 HTTP 入参、调用 service、返回 `OK` / `Fail`。
-- `service/` 放业务逻辑、默认值、校验、时间、ID、鉴权等处理。
-- `repository/` 只做数据库访问和 GORM 查询。
-- `model/` 只定义数据结构、枚举和简单模型方法。
-- 列表接口优先沿用 `model.Query`、`Normalize`、分页和标签筛选方式。
-- 业务接口保持 `{ code, data, msg }` 的响应结构。
-- 新增数据表时同步更新 `docs/backend-database.md`。
 
 ## 前端规范
 

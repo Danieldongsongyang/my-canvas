@@ -5,6 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 画布生图远程渠道请求路径保持走前端代理 `/api/canvas/relay/images/generations` 和 `/api/canvas/relay/images/edits`；当前只接 `mange-backend`、没有 `/api/settings` 时前端会默认使用云端 relay，并在登录/刷新恢复时同步 `/api/user/models`、请求前自动补齐 `/api/canvas/relay-token` 初始化；后端会在分发前把 `/api/canvas/relay/*` 改写为 `/v1/*`，需要验证前端运行在 `3002`、后端运行在 `3000` 时，浏览器请求显示为 `3002`，并由 Next 代理正确转发到 `3000` 后端返回图片，带参考图的 multipart 编辑也能进入生图接口。
+- 画布详情页新增 `workspace-session` 会话 module，统一承接项目 hydrate/persist、history、viewport、selection drag、connections、groups、files 和 clipboard 的 hook 拼装；页面行为目标保持不变，需要回归验证项目加载保存、撤销重做、框选拖拽、连线、分组、文件上传、复制粘贴、清空画布和助手会话保存都正常。
 - 画布详情页第一阶段低风险重构已抽出页面私有类型、页面工具函数、latest refs hook 和视口 hook；行为目标保持不变，需要回归验证项目加载与保存、画布初始居中、缩放与重置视图、节点创建、连线吸附、框选/拖拽、复制粘贴、分组操作、文件上传和生成配置入口都仍正常。
 - 画布详情页继续抽出 `use-canvas-project-state` 和 `use-canvas-project-persistence`，项目加载、聊天会话恢复、节点/连线/分组/画布显示状态保存和视口 debounce 已从页面移出；需要回归验证项目打开失败仍会回到画布列表，项目恢复后历史快照能正确重置，滚动缩放后画布视口仍能按节奏持久化。
 - 画布详情页继续抽出 `use-canvas-panels`，右键菜单、添加节点菜单、小地图、清空确认、素材库弹窗、节点详情/裁剪/切图/局部编辑/放大/超分/换角度/预览弹窗、助手折叠和标题编辑等页面私有 UI 开关状态已从页面移出；需要回归验证各弹窗互斥关闭、图片设置浮层打开时隐藏悬浮工具栏、图片预览缩放重置、助手展开收起和标题重命名都正常。

@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import { userAuthHeaders } from "@/services/api/auth";
+import { ensureCanvasRelayToken, userAuthHeaders } from "@/services/api/auth";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
@@ -19,6 +19,8 @@ type ImageApiResponse = {
     error?: { message?: string };
     code?: number;
     msg?: string;
+    success?: boolean;
+    message?: string;
 };
 
 const QUALITY_BASE: Record<string, number> = {
@@ -120,8 +122,14 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
 }
 
 function parseImagePayload(payload: ImageApiResponse) {
+    if (payload.success === false) {
+        throw new Error(payload.message || "请求失败");
+    }
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || "请求失败");
+    }
+    if (payload.error?.message) {
+        throw new Error(payload.error.message);
     }
     const images =
         payload.data
@@ -137,9 +145,17 @@ function parseImagePayload(payload: ImageApiResponse) {
 }
 
 function readAxiosError(error: unknown, fallback: string) {
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; message?: string; code?: number } | string>(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
+        if (typeof responseData === "string") {
+            try {
+                const payload = JSON.parse(responseData) as { error?: { message?: string }; msg?: string; message?: string };
+                return payload.msg || payload.message || payload.error?.message || readStatusError(error.response?.status, fallback);
+            } catch {
+                return responseData || readStatusError(error.response?.status, fallback);
+            }
+        }
+        return responseData?.msg || responseData?.message || responseData?.error?.message || readStatusError(error.response?.status, fallback);
     }
     return error instanceof Error ? error.message : fallback;
 }
@@ -173,16 +189,21 @@ function aiApiUrl(config: AiConfig, path: string) {
     return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
 }
 
-function relayUserId() {
+async function relayUserId() {
     const { user, relayReady } = useUserStore.getState();
-    if (!user?.id || !relayReady) throw new Error("请先登录并初始化云端 Relay");
+    if (!user?.id) throw new Error("请先登录并初始化云端 Relay");
+    if (!relayReady) {
+        const relay = await ensureCanvasRelayToken(user.id);
+        if (!relay.relay_ready) throw new Error("Relay API Key 初始化失败");
+        useUserStore.setState({ relayReady: true });
+    }
     return user.id;
 }
 
-function aiHeaders(config: AiConfig, contentType?: string) {
+async function aiHeaders(config: AiConfig, contentType?: string) {
     return config.channelMode === "remote"
         ? {
-              ...userAuthHeaders(relayUserId()),
+              ...userAuthHeaders(await relayUserId()),
               ...(contentType ? { "Content-Type": contentType } : {}),
           }
         : {
@@ -217,7 +238,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
                 output_format: IMAGE_OUTPUT_FORMAT,
             },
             {
-                headers: aiHeaders(config, "application/json"),
+                headers: await aiHeaders(config, "application/json"),
                 withCredentials: true,
             },
         );
@@ -251,7 +272,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config), withCredentials: true });
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: await aiHeaders(config), withCredentials: true });
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
@@ -275,7 +296,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
             },
             {
                 headers: {
-                    ...aiHeaders(config, "application/json"),
+                    ...(await aiHeaders(config, "application/json")),
                 } as Record<string, string>,
                 responseType: "text",
                 withCredentials: true,
