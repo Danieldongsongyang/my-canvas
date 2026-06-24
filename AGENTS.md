@@ -1,7 +1,5 @@
 # AGENTS.md
 
-本文档用于约束本项目中的 AI / 自动化开发行为。开发时优先遵循本文件，其次遵循用户当前消息。
-
 ## 基本原则
 
 - 先读现有代码，再动手修改，优先沿用项目已有结构和写法。
@@ -12,12 +10,6 @@
 - 每次写完代码，不要执行构建、类型检查或测试，用户自己来。
 - 不要改无关文件，不要顺手重构。
 - 如果工作区已有用户改动，不要回滚，不要覆盖；只在必要范围内追加修改。
-
-## 反复提醒沉淀
-
-- 如果开发过程中总是遇到某个问题，或者用户反复提醒同一个注意事项，需要把该注意事项补充到本文件。
-- 补充时写成明确、可执行的规则，避免只写模糊描述。
-- 新规则应放到最相关的章节；找不到合适章节时放到“项目注意事项”。
 
 
 ## 前端规范
@@ -54,30 +46,5 @@
 - 图片节点尺寸逻辑要尊重原始比例，除非功能明确要求自由变形。
 - 批量生成、多图展示、助手面板等画布交互要尽量简洁，不要占用过多画布空间。
 
-## 文档规范
 
-- README 保持简洁，只放项目介绍、核心功能、快速开始和文档入口。
-- `docs/index.md` 放给 AI 使用的文档索引，不要再放到 `docs/content/docs/` 内容目录里。
-- 详细功能介绍写到 `docs/content/docs/overview/features.mdx`。
-- 后续待办写到 `docs/content/docs/progress/todo.mdx`。
-- 已实现但还需要用户测试确认的事项写到 `docs/content/docs/progress/pending-test.mdx`。
-- `docs/content/docs/progress/pending-test.mdx` 用来记录这个版本实际做了哪些可测试变更；`CHANGELOG.md` 的 `Unreleased` 只保留对这些变更的版本级归纳，避免逐条照搬实现细节。
-- 每次 todo 事项完成后，先从 `docs/content/docs/progress/todo.mdx` 移到 `docs/content/docs/progress/pending-test.mdx`，不要直接写进正式功能说明；用户确认测试通过后再更新 `docs/content/docs/overview/features.mdx`。
-- 每次任务完成前，都要根据实际变更检查并更新 `docs/content/docs/progress/todo.mdx` 和 `docs/content/docs/progress/pending-test.mdx`；如果功能或待办没有变化，也要确认无需修改。
-- 接口响应规则写到 `docs/content/docs/backend/api-response.mdx`。
-- 数据库结构写到 `docs/content/docs/backend/backend-database.mdx`。
-- 文档不要写过期日期；除非用户明确要求记录具体时间。
 
-## 发版本流程
-
-- 发版本时，先把 `CHANGELOG.md` 的 `Unreleased` 变更整理成新的版本记录，并保留空的 `Unreleased` 标题。
-- 按当前版本号提升一个版本，更新根目录 `VERSION`。
-- 将当前未提交的代码全部提交到 Git。
-- 提交完成后，给当前提交打最新版本号对应的 tag，例如 `v0.0.5`。
-- 发版本流程中不要执行编译、测试或构建，除非用户明确要求。
-
-## 项目注意事项
-
-- 当前画布项目和“我的素材”主要保存在浏览器本地，不要在文档中误写成已支持云同步。
-- 当前 AI API Key 存在浏览器本地，并由前端直接请求 OpenAI 兼容接口；涉及安全说明时要写清楚。
-- Docker 静态资源路径目前仍是待办项，文档中不要过度承诺生产部署已经完全验证。
