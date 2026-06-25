@@ -12,21 +12,21 @@ const defaultPageSize = 10;
 export function useAdminCreditLogs() {
     const { message } = App.useApp();
     const queryClient = useQueryClient();
-    const token = useUserStore((state) => state.token);
+    const userId = useUserStore((state) => state.user?.id || "");
     const clearSession = useUserStore((state) => state.clearSession);
     const [keyword, setKeyword] = useState("");
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(defaultPageSize);
 
     const query = useQuery({
-        queryKey: ["admin", "credit-logs", token, keyword, page, pageSize],
-        queryFn: () => fetchAdminCreditLogs(token, { keyword, page, pageSize }),
-        enabled: Boolean(token),
+        queryKey: ["admin", "credit-logs", userId, keyword, page, pageSize],
+        queryFn: () => fetchAdminCreditLogs(userId, { keyword, page, pageSize }),
+        enabled: Boolean(userId),
         retry: false,
     });
 
     const saveMutation = useMutation({
-        mutationFn: (log: Partial<AdminCreditLog>) => saveAdminCreditLog(token, log),
+        mutationFn: (log: Partial<AdminCreditLog>) => saveAdminCreditLog(userId, log),
         onSuccess: async (_, log) => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "credit-logs"] });
             message.success(log.id ? "日志已保存" : "日志已新增");
@@ -35,7 +35,7 @@ export function useAdminCreditLogs() {
     });
 
     const deleteMutation = useMutation({
-        mutationFn: (id: string) => deleteAdminCreditLog(token, id),
+        mutationFn: (id: string) => deleteAdminCreditLog(userId, id),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "credit-logs"] });
             message.success("日志已删除");

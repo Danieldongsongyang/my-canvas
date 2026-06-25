@@ -1,4 +1,4 @@
-export const AUTH_TOKEN_KEY = "infinite-canvas-auth-session-v2";
+export const AUTH_SESSION_KEY = "infinite-canvas-auth-session-v3";
 
 export type UserRole = "guest" | "user" | "admin";
 
@@ -28,7 +28,9 @@ export type CanvasRelayToken = {
 
 type MangeApiResponse<T> = {
     success?: boolean;
+    code?: number;
     message?: string;
+    msg?: string;
     data?: T;
 };
 
@@ -80,8 +82,8 @@ export async function ensureCanvasRelayToken(userId?: string | number) {
         body: "{}",
     });
     const payload = (await response.json()) as MangeApiResponse<CanvasRelayToken>;
-    if (!response.ok || payload.success === false || !payload.data?.relay_ready) {
-        throw new Error(payload.message || "Relay API Key 初始化失败");
+    if (!response.ok || payload.success === false || (typeof payload.code === "number" && payload.code !== 0) || !payload.data?.relay_ready) {
+        throw new Error(payload.message || payload.msg || "Relay API Key 初始化失败");
     }
     return payload.data;
 }
@@ -102,17 +104,30 @@ async function mangeRequest<T>(url: string, init: RequestInit, userId?: string |
             headers,
         });
     } catch {
-        throw new Error("接口连接失败，请确认后端服务已启动");
+        throw new Error("接口连接失败，请确认 mange-backend 服务是否启动");
     }
 
     const payload = (await response.json().catch(() => null)) as MangeApiResponse<T> | null;
     if (!payload || typeof payload !== "object") {
-        throw new Error(response.status === 404 ? "接口不存在，请确认后端服务已启动" : "接口返回异常，请稍后重试");
+        throw new Error(response.status === 404 ? "接口不存在，请确认 mange-backend 服务是否启动" : "接口返回异常，请稍后重试");
     }
-    if (!response.ok || payload.success === false) {
-        throw new Error(payload.message || "请求失败");
+    if (!response.ok || payload.success === false || (typeof payload.code === "number" && payload.code !== 0)) {
+        throw new Error(readMangeErrorMessage(url, payload));
     }
     return payload.data as T;
+}
+
+function readMangeErrorMessage<T>(url: string, payload: MangeApiResponse<T>) {
+    const message = payload.message || payload.msg || "请求失败";
+    if (url !== "/api/user/login") return message;
+    const lowerMessage = message.toLowerCase();
+    if (/(2fa|mfa|totp|otp|two[- ]?factor|二次验证|两步验证|验证码)/i.test(lowerMessage)) {
+        return "当前账号开启了二次验证，桌面端第一阶段暂不支持，请先在 mange-backend 网页端完成登录设置或改用用户名密码账号。";
+    }
+    if (/(oauth|passkey|webauthn|第三方|通行密钥)/i.test(lowerMessage)) {
+        return "桌面端第一阶段暂不支持 OAuth 或 Passkey 登录，请在 mange-backend 网页端完成账号绑定后使用用户名密码登录。";
+    }
+    return message;
 }
 
 function normalizeMangeUser(user: MangeUser): AuthUser {

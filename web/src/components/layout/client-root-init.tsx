@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { App } from "antd";
 
 import { useConfigStore } from "@/stores/use-config-store";
@@ -12,20 +12,25 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
     const pathname = usePathname();
+    const router = useRouter();
     const hydrateUser = useUserStore((state) => state.hydrateUser);
     const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
     const publicSettings = useConfigStore((state) => state.publicSettings);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const isLoginPage = pathname === "/login" || pathname === "/admin/login";
+    const isProtectedPage = ["/admin", "/asset-library", "/assets", "/canvas", "/image", "/prompts", "/video"].some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
     useEffect(() => {
         void loadPublicSettings();
     }, [loadPublicSettings]);
 
     useEffect(() => {
-        if (!isLoginPage) void hydrateUser();
-    }, [hydrateUser, isLoginPage]);
+        if (isLoginPage) return;
+        void hydrateUser().then((user) => {
+            if (!user && isProtectedPage) router.replace(`/login?redirect=${encodeURIComponent(`${pathname}${window.location.search}`)}`);
+        });
+    }, [hydrateUser, isLoginPage, isProtectedPage, pathname, router]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;

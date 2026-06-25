@@ -12,21 +12,21 @@ const defaultPageSize = 10;
 export function useAdminUsers() {
     const { message } = App.useApp();
     const queryClient = useQueryClient();
-    const token = useUserStore((state) => state.token);
+    const userId = useUserStore((state) => state.user?.id || "");
     const clearSession = useUserStore((state) => state.clearSession);
     const [keyword, setKeyword] = useState("");
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(defaultPageSize);
 
     const query = useQuery({
-        queryKey: ["admin", "users", token, keyword, page, pageSize],
-        queryFn: () => fetchAdminUsers(token, { keyword, page, pageSize }),
-        enabled: Boolean(token),
+        queryKey: ["admin", "users", userId, keyword, page, pageSize],
+        queryFn: () => fetchAdminUsers(userId, { keyword, page, pageSize }),
+        enabled: Boolean(userId),
         retry: false,
     });
 
     const saveMutation = useMutation({
-        mutationFn: (user: Partial<AdminUser> & { password?: string }) => saveAdminUser(token, user),
+        mutationFn: (user: Partial<AdminUser> & { password?: string }) => saveAdminUser(userId, user),
         onSuccess: async (_, user) => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
             message.success(user.id ? "用户已保存" : "用户已新增");
@@ -35,7 +35,7 @@ export function useAdminUsers() {
     });
 
     const deleteMutation = useMutation({
-        mutationFn: (id: string) => deleteAdminUser(token, id),
+        mutationFn: (id: string) => deleteAdminUser(userId, id),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
             message.success("用户已删除");
@@ -44,7 +44,7 @@ export function useAdminUsers() {
     });
 
     const creditMutation = useMutation({
-        mutationFn: ({ id, credits }: { id: string; credits: number }) => adjustAdminUserCredits(token, id, credits),
+        mutationFn: ({ id, credits }: { id: string; credits: number }) => adjustAdminUserCredits(userId, id, credits),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
             message.success("算力点已调整");

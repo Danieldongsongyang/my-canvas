@@ -47,7 +47,7 @@ type EditorMode = "visual" | "json";
 type ModelSelectTabKey = "new" | "current";
 
 export default function AdminSettingsPage() {
-    const token = useUserStore((state) => state.token);
+    const userId = useUserStore((state) => state.user?.id || "");
     const { message } = App.useApp();
     const [form] = Form.useForm<AdminSettings>();
     const [activeTab, setActiveTab] = useState<SettingsTabKey>("public");
@@ -88,10 +88,10 @@ export default function AdminSettingsPage() {
     const activeSelectedCount = activeModelSelectModels.filter((model) => modelSelectSelected.includes(model)).length;
 
     const loadSettings = async () => {
-        if (!token) return;
+        if (!userId) return;
         setIsLoading(true);
         try {
-            const data = normalizeSettings(await fetchAdminSettings(token));
+            const data = normalizeSettings(await fetchAdminSettings(userId));
             form.setFieldsValue(data);
             setChannels(data.private.channels);
             setModelCosts(data.public.modelChannel.modelCosts);
@@ -109,21 +109,21 @@ export default function AdminSettingsPage() {
 
     useEffect(() => {
         void loadSettings();
-    }, [token]);
+    }, [userId]);
 
     const changeTab = (nextTab: SettingsTabKey) => {
         setActiveTab(nextTab);
     };
 
     const saveSettings = async () => {
-        if (!token) return;
+        if (!userId) return;
         const values = await collectSettings(form, editorMode, jsonText, message);
         if (!values) {
             return;
         }
         setIsSaving(true);
         try {
-            const saved = normalizeSettings(await saveAdminSettings(token, values));
+            const saved = normalizeSettings(await saveAdminSettings(userId, values));
             const merged = mergeChannelApiKeys(values.private.channels, saved);
             form.setFieldsValue(merged);
             setChannels(merged.private.channels);
@@ -200,7 +200,7 @@ export default function AdminSettingsPage() {
     };
 
     const fetchChannelModelList = async () => {
-        if (!token) {
+        if (!userId) {
             message.warning("请先登录后再拉取模型列表");
             return;
         }
@@ -215,7 +215,7 @@ export default function AdminSettingsPage() {
         }
         setIsFetchingChannelModels(true);
         try {
-            const channelModels = await fetchChannelModels(token, { index: editingChannelIndex ?? undefined, channel: normalizeChannel(channel) });
+            const channelModels = await fetchChannelModels(userId, { index: editingChannelIndex ?? undefined, channel: normalizeChannel(channel) });
             const current = isModelSelectorOpen ? uniqueModels(modelSelectSelected) : uniqueModels(channelForm.getFieldValue("models") || []);
             rememberModels(channelModels);
             if (!channelModels.length) {
@@ -315,12 +315,12 @@ export default function AdminSettingsPage() {
 
     const testModelOnline = async (model: string) => {
         if (testChannelIndex === null) return;
-        if (!token) return;
+        if (!userId) return;
         const channel = normalizeChannel(channels[testChannelIndex]);
         setTestingModels((current) => [...current, model]);
         try {
             const startedAt = performance.now();
-            const result = await testChannelModel(token, { index: testChannelIndex, channel, model });
+            const result = await testChannelModel(userId, { index: testChannelIndex, channel, model });
             setTestResults((current) => ({ ...current, [model]: { status: "success", duration: `${((performance.now() - startedAt) / 1000).toFixed(2)}s`, message: result } }));
         } catch (error) {
             setTestResults((current) => ({ ...current, [model]: { status: "error", message: error instanceof Error ? error.message : "测试失败" } }));
@@ -339,7 +339,7 @@ export default function AdminSettingsPage() {
     const testModels = (testChannel?.models || []).filter((model) => model.toLowerCase().includes(testKeyword.trim().toLowerCase()));
 
     async function persistChannels(nextChannels: AdminModelChannel[]) {
-        if (!token) return;
+        if (!userId) return;
         const values = normalizeSettings(form.getFieldsValue(true) as AdminSettings);
         const nextChannelModels = collectChannelModels(nextChannels);
         const nextSettings = normalizeSettings({
@@ -347,7 +347,7 @@ export default function AdminSettingsPage() {
             public: { ...values.public, modelChannel: { ...values.public.modelChannel, availableModels: nextChannelModels } },
             private: { ...values.private, channels: nextChannels },
         });
-        const saved = normalizeSettings(await saveAdminSettings(token, nextSettings));
+        const saved = normalizeSettings(await saveAdminSettings(userId, nextSettings));
         const merged = mergeChannelApiKeys(nextChannels, saved);
         setChannels(merged.private.channels);
         setModelCosts(merged.public.modelChannel.modelCosts);

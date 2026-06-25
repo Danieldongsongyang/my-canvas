@@ -69,7 +69,7 @@ export function AppConfigModal() {
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const publicSettings = useConfigStore((state) => state.publicSettings);
-    const userId = useUserStore((state) => state.user?.id || state.token);
+    const userId = useUserStore((state) => state.user?.id);
     const effectiveConfig = useEffectiveConfig();
     const modelChannel = publicSettings?.modelChannel;
     const allowCustomChannel = modelChannel?.allowCustomChannel === true;

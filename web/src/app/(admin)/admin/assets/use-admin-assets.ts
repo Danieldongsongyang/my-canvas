@@ -12,7 +12,7 @@ const defaultPageSize = 10;
 export function useAdminAssets() {
     const { message } = App.useApp();
     const queryClient = useQueryClient();
-    const token = useUserStore((state) => state.token);
+    const userId = useUserStore((state) => state.user?.id || "");
     const clearSession = useUserStore((state) => state.clearSession);
     const [keyword, setKeyword] = useState("");
     const [type, setType] = useState("");
@@ -21,14 +21,14 @@ export function useAdminAssets() {
     const [pageSize, setPageSize] = useState(defaultPageSize);
 
     const query = useQuery({
-        queryKey: ["admin", "assets", token, keyword, type, tag, page, pageSize],
-        queryFn: () => fetchAdminAssets(token, { keyword, type, tag, page, pageSize }),
-        enabled: Boolean(token),
+        queryKey: ["admin", "assets", userId, keyword, type, tag, page, pageSize],
+        queryFn: () => fetchAdminAssets(userId, { keyword, type, tag, page, pageSize }),
+        enabled: Boolean(userId),
         retry: false,
     });
 
     const saveMutation = useMutation({
-        mutationFn: (asset: Partial<AdminAsset>) => saveAdminAsset(token, asset),
+        mutationFn: (asset: Partial<AdminAsset>) => saveAdminAsset(userId, asset),
         onSuccess: async (_, asset) => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "assets"] });
             message.success(asset.id ? "素材已保存" : "素材已新增");
@@ -39,7 +39,7 @@ export function useAdminAssets() {
     });
 
     const deleteMutation = useMutation({
-        mutationFn: (id: string) => deleteAdminAsset(token, id),
+        mutationFn: (id: string) => deleteAdminAsset(userId, id),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ["admin", "assets"] });
             message.success("素材已删除");

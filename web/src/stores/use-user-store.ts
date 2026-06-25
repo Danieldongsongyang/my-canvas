@@ -3,21 +3,19 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { AUTH_TOKEN_KEY, ensureCanvasRelayToken, fetchCurrentUser, login, logout, type AuthPayload, type AuthUser } from "@/services/api/auth";
+import { AUTH_SESSION_KEY, ensureCanvasRelayToken, fetchCurrentUser, login, logout, type AuthPayload, type AuthUser } from "@/services/api/auth";
 
 type UserStore = {
-    token: string;
     relayReady: boolean;
     user: AuthUser | null;
     isReady: boolean;
     isLoading: boolean;
-    setSession: (user: AuthUser, relayReady?: boolean) => void;
     clearSession: () => void;
-    hydrateUser: () => Promise<void>;
+    hydrateUser: () => Promise<AuthUser | null>;
     login: (payload: AuthPayload) => Promise<AuthUser>;
 };
 
-async function initRelay(userId?: string | number) {
+async function initRelay(userId: string | number) {
     try {
         return (await ensureCanvasRelayToken(userId)).relay_ready === true;
     } catch {
@@ -25,57 +23,70 @@ async function initRelay(userId?: string | number) {
     }
 }
 
+async function requireRelayReady(userId: string | number) {
+    try {
+        if ((await ensureCanvasRelayToken(userId)).relay_ready === true) return true;
+    } catch {
+        throw new Error("登录成功，但初始化 AI Key 失败，请稍后重试或联系管理员");
+    }
+    throw new Error("登录成功，但初始化 AI Key 失败，请稍后重试或联系管理员");
+}
+
 export const useUserStore = create<UserStore>()(
     persist(
         (set, get) => ({
-            token: "",
             relayReady: false,
             user: null,
             isReady: false,
             isLoading: false,
-            setSession: (user, relayReady) => set((state) => ({ token: String(user.id), user, relayReady: relayReady ?? state.relayReady, isReady: true })),
             clearSession: () => {
                 const userId = get().user?.id;
-                set({ token: "", relayReady: false, user: null, isReady: true });
+                set({ relayReady: false, user: null, isReady: true, isLoading: false });
                 void logout(userId);
             },
             hydrateUser: async () => {
-                const userId = get().user?.id || get().token;
+                const userId = get().user?.id;
                 if (!userId) {
-                    set({ user: null, relayReady: false, isReady: true });
-                    return;
+                    set({ user: null, relayReady: false, isReady: true, isLoading: false });
+                    return null;
                 }
                 set({ isLoading: true });
                 try {
                     const user = await fetchCurrentUser(userId);
                     if (user.role === "guest") {
-                        set({ token: "", relayReady: false, user: null, isReady: true, isLoading: false });
-                        return;
+                        set({ relayReady: false, user: null, isReady: true, isLoading: false });
+                        return null;
                     }
                     const relayReady = get().relayReady || (await initRelay(user.id));
-                    set({ token: String(user.id), user, relayReady, isReady: true, isLoading: false });
+                    set({ user, relayReady, isReady: true, isLoading: false });
+                    return user;
                 } catch {
-                    set({ token: "", relayReady: false, user: null, isReady: true, isLoading: false });
+                    set({ relayReady: false, user: null, isReady: true, isLoading: false });
+                    return null;
                 }
             },
             login: async (payload) => {
-                set({ isLoading: true });
+                set({ relayReady: false, isLoading: true });
                 try {
                     const session = await login(payload);
-                    const relayReady = await initRelay(session.user.id);
-                    set({ token: String(session.user.id), relayReady, user: session.user, isReady: true, isLoading: false });
+                    if (session.user.role === "guest") throw new Error("游客账号暂不支持桌面端登录，请使用正式账号登录");
+                    const relayReady = await requireRelayReady(session.user.id);
+                    set({ relayReady, user: session.user, isReady: true, isLoading: false });
                     return session.user;
                 } catch (error) {
-                    set({ isLoading: false });
+                    set({ relayReady: false, user: null, isReady: true, isLoading: false });
                     throw error;
                 }
             },
         }),
         {
-            name: AUTH_TOKEN_KEY,
-            partialize: (state) => ({ token: state.token, user: state.user, relayReady: state.relayReady }),
+            name: AUTH_SESSION_KEY,
+            partialize: (state) => ({ user: state.user, relayReady: state.relayReady }),
             onRehydrateStorage: () => (state) => {
-                if (state) state.isReady = false;
+                if (state) {
+                    state.isReady = false;
+                    state.isLoading = false;
+                }
             },
         },
     ),

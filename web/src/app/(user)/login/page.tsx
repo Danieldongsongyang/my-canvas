@@ -42,11 +42,10 @@ function LoginContent() {
 
     const submit = async (values: LoginFormValues) => {
         try {
-            const user = await login({ username: values.username, password: values.password });
+            await login({ username: values.username, password: values.password });
             message.success("登录成功");
             router.replace(redirect);
             router.refresh();
-            if (user.role !== "admin") router.replace("/");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "登录失败");
         }

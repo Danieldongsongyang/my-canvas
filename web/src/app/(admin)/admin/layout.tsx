@@ -23,7 +23,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const { token: antToken } = theme.useToken();
     const router = useRouter();
     const pathname = usePathname();
-    const token = useUserStore((state) => state.token);
     const user = useUserStore((state) => state.user);
     const isReady = useUserStore((state) => state.isReady);
     const logout = useUserStore((state) => state.clearSession);
@@ -42,16 +41,16 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (!isReady) return;
-        if (!token) {
+        if (!user) {
             router.replace("/login?redirect=/admin");
             return;
         }
         if (user?.role !== "admin") {
             router.replace("/");
         }
-    }, [isReady, router, token, user?.role]);
+    }, [isReady, router, user]);
 
-    if (!isReady || !token || user?.role !== "admin") {
+    if (!isReady || !user || user.role !== "admin") {
         return (
             <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", background: antToken.colorBgLayout }}>
                 <span />
