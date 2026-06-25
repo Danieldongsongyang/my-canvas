@@ -7,7 +7,17 @@ type RouteContext = {
     params: Promise<{ path: string[] }>;
 };
 
-const relayPrefixes = new Set(["v1", "v1beta", "mj", "suno"]);
+const allowedUserRoutes: Record<string, string> = {
+    "user/login": "POST",
+    "user/logout": "GET",
+    "user/self": "GET",
+    "user/models": "GET",
+};
+
+const allowedRelayPostRoutes = new Set(["chat/completions", "images/generations", "images/edits", "audio/speech", "videos"]);
+
+const PROXY_ERROR_MESSAGE = "接口连接失败，请确认 mange-backend 服务是否启动";
+const UNSUPPORTED_API_MESSAGE = "该接口不在桌面端同源适配层白名单中，请使用 mange-backend 网页端或本地数据来源";
 
 function proxyHeaders(request: NextRequest) {
     const headers = new Headers(request.headers);
@@ -21,23 +31,43 @@ function proxyHeaders(request: NextRequest) {
 
 function responseHeaders(response: Response) {
     const headers = new Headers(response.headers);
+    const setCookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
+    if (setCookies?.length) {
+        headers.delete("set-cookie");
+        setCookies.forEach((cookie) => headers.append("set-cookie", cookie));
+    }
     headers.delete("content-length");
     headers.delete("content-encoding");
     headers.delete("transfer-encoding");
     return headers;
 }
 
+function jsonError(message: string, status: number) {
+    return Response.json({ success: false, code: status, data: null, message, msg: message }, { status });
+}
+
+function isAllowedRelayVideoGet(path: string[]) {
+    return path[2] === "videos" && (path.length === 4 || (path.length === 5 && path[4] === "content"));
+}
+
+function canProxy(path: string[], method: string) {
+    const apiPath = path.join("/");
+    if (allowedUserRoutes[apiPath]) return allowedUserRoutes[apiPath] === method;
+    if (apiPath === "canvas/relay-token") return method === "POST";
+    if (path[0] !== "canvas" || path[1] !== "relay") return false;
+    const relayPath = path.slice(2).join("/");
+    if (method === "POST") return allowedRelayPostRoutes.has(relayPath);
+    if (method === "GET") return isAllowedRelayVideoGet(path);
+    return false;
+}
+
 async function proxy(request: NextRequest, context: RouteContext) {
     const { path } = await context.params;
-    const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:3000";
-    const relayApiBaseUrl = process.env.MANGE_BACKEND_API_URL || apiBaseUrl;
+    if (!canProxy(path, request.method)) return jsonError(UNSUPPORTED_API_MESSAGE, 404);
+
+    const mangeBackendBaseUrl = process.env.MANGE_BACKEND_API_URL || process.env.API_BASE_URL || "http://localhost:3000";
     const encodedPath = path.map(encodeURIComponent).join("/");
-    const isCanvasRelay = path[0] === "canvas";
-    const isMangeBackendApi = isCanvasRelay || path[0] === "user";
-    const targetPath = relayPrefixes.has(path[0]) ? `/${encodedPath}` : `/api/${encodedPath}`;
-    const targetBaseUrl = relayPrefixes.has(path[0]) || isMangeBackendApi ? relayApiBaseUrl : apiBaseUrl;
-    const resolvedTargetPath = isCanvasRelay ? `/api/${encodedPath}` : targetPath;
-    const target = `${targetBaseUrl.replace(/\/$/, "")}${resolvedTargetPath}${request.nextUrl.search}`;
+    const target = `${mangeBackendBaseUrl.replace(/\/$/, "")}/api/${encodedPath}${request.nextUrl.search}`;
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
 
     try {
@@ -56,7 +86,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
         });
     } catch (error) {
         console.error("Failed to proxy", target, error);
-        return Response.json({ code: 1, data: null, msg: "接口连接失败，请确认后端服务已启动" }, { status: 502 });
+        return jsonError(PROXY_ERROR_MESSAGE, 502);
     }
 }
 
