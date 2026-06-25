@@ -7,6 +7,10 @@
         "dev": "next dev --webpack -H 0.0.0.0 -p 3002",
         "build": "next build",
         "start": "next start",
+        "prepare": "cd .. && husky .husky",
+        "precommit": "lint-staged && bun run typecheck && bun run test",
+        "typecheck": "next typegen && tsc --noEmit",
+        "test": "vitest run",
         "format": "prettier --write .",
         "format:check": "prettier --check ."
     },
@@ -45,7 +49,10 @@
         "@types/node": "^20",
         "@types/react": "19.1.12",
         "@types/react-dom": "19.1.9",
+        "husky": "^9.1.7",
+        "lint-staged": "^17.0.8",
         "prettier": "^3.8.3",
-        "typescript": "^5"
+        "typescript": "^5",
+        "vitest": "^3.2.3"
     }
 }

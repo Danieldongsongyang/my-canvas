@@ -364,7 +364,11 @@ export const CanvasNode = React.memo(function CanvasNode({
             <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] max-w-[calc(100vw-48px)] -translate-x-1/2 pt-4" style={{ width: panelWidth }}>{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? (
+                <div className="absolute left-1/2 top-full z-[70] max-w-[calc(100vw-48px)] -translate-x-1/2 pt-4" style={{ width: panelWidth }}>
+                    {renderPanel(data)}
+                </div>
+            ) : null}
         </div>
     );
 });
@@ -464,7 +468,6 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     style={textStyle}
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
-                    highlightLabels={false}
                     onChange={(value) => onContentChange(node.id, value)}
                     onBlur={onStopEditing}
                     onKeyDown={(event) => {
@@ -486,11 +489,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     </div>
                 </div>
             ) : (
-                <div
-                    className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
-                    style={textStyle}
-                    onWheel={(event) => event.stopPropagation()}
-                >
+                <div className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono" style={textStyle} onWheel={(event) => event.stopPropagation()}>
                     {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
                 </div>
             )}
@@ -524,11 +523,7 @@ function TextNodeActionItem({ icon, label, theme, onClick }: { icon: ReactNode; 
 }
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
-    return (
-        <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>
-            {reference.label}
-        </span>
-    );
+    return <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>{reference.label}</span>;
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
@@ -578,7 +573,6 @@ function EmptyImageContent({ node, theme, isSelected, isBatchRoot, batchCount, b
         </div>
     ) : (
         <div className="flex h-full w-full flex-col justify-center gap-5 px-8 py-7" style={{ color: theme.node.placeholder }}>
-
             {isSelected ? (
                 <button
                     type="button"

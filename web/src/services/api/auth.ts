@@ -93,14 +93,13 @@ export function userAuthHeaders(userId?: string | number) {
 async function mangeRequest<T>(url: string, init: RequestInit, userId?: string | number) {
     let response: Response;
     try {
+        const headers = new Headers(init.headers);
+        if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+        if (userId && !headers.has("New-Api-User")) headers.set("New-Api-User", String(userId));
         response = await fetch(url, {
             ...init,
             credentials: "include",
-            headers: {
-                ...(init.body ? { "Content-Type": "application/json" } : {}),
-                ...userAuthHeaders(userId),
-                ...init.headers,
-            },
+            headers,
         });
     } catch {
         throw new Error("接口连接失败，请确认后端服务已启动");
