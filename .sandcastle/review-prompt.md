@@ -2,6 +2,8 @@
 
 Review the code changes on branch `{{BRANCH}}` and improve code clarity, consistency, and maintainability while preserving exact functionality.
 
+The frontend application lives in `web/`. Run frontend package commands from that directory.
+
 # CONTEXT
 
 ## Branch diff

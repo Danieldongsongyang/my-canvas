@@ -367,8 +367,8 @@ base_url = "http://host.docker.internal:<port>/v1"
 7. 最终报告列出改了哪些文件、验证命令和结果。不要输出真实 API Key。
 ```
 
-在 web/.sandcastle/ 下给 Sandcastle 专门放一个 Codex home，例如：
-web/.sandcastle/codex-home/config.toml
+在 `.sandcastle/` 下给 Sandcastle 专门放一个 Codex home，例如：
+`.sandcastle/codex-home/config.toml`
 内容类似这样：
 model_provider = "thirdparty"
 model = "你的第三方模型ID"
@@ -378,13 +378,13 @@ name = "Third Party API"
 base_url = "https://third-party.example.com/v1"
 wire_api = "responses"
 env_key = "THIRD_PARTY_API_KEY"
-然后在 web/.sandcastle/.env 里加：
+然后在 `.sandcastle/.env` 里加：
 CODEX_HOME=/home/agent/workspace/.sandcastle/codex-home
 THIRD_PARTY_API_KEY=你的第三方APIKey
 GH_TOKEN=你原来的GitHubToken
 这里的 /home/agent/workspace 是 Sandcastle Docker 沙箱里的 repo 路径，刚才我也从包里确认了常量就是这个路径。不要写宿主机路径 /Users/a1/...，容器里面看不到那个路径。
 还要改 main.ts 里的模型名
-你现在的 [web/.sandcastle/main.ts (line 81)](/Users/a1/Desktop/my-canvas/web/.sandcastle/main.ts:81) 里写死了：
+你现在的 `.sandcastle/main.ts` 里写死了：
 agent: sandcastle.codex("gpt-5.4")
 Sandcastle 最终会生成：
 codex exec ... -m gpt-5.4
@@ -392,6 +392,6 @@ codex exec ... -m gpt-5.4
 const CODEX_MODEL = process.env.SANDCASTLE_CODEX_MODEL || "你的第三方模型ID";
 然后把几处都改成：
 agent: sandcastle.codex(CODEX_MODEL)
-你的 web/.sandcastle/.env 再加：
+你的 `.sandcastle/.env` 再加：
 SANDCASTLE_CODEX_MODEL=你的第三方模型ID
 这样以后换模型不用再改代码。

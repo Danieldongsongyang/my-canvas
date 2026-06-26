@@ -8,6 +8,8 @@ Only work on the issue specified.
 
 Work on branch {{BRANCH}}. Make commits and run tests.
 
+The frontend application lives in `web/`. Run frontend package commands from that directory.
+
 # CONTEXT
 
 Here are the last 10 commits:
@@ -35,7 +37,7 @@ If applicable, use RGR to complete the task.
 
 # FEEDBACK LOOPS
 
-Before committing, run `npm run typecheck` and `npm run test` to ensure the tests pass.
+Before committing, run `cd web && npm run typecheck` and `cd web && npm run test` to ensure the tests pass.
 
 # COMMIT
 

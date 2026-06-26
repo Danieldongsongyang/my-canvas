@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sandcastle": "tsx .sandcastle/main.ts"
+  },
+  "devDependencies": {
+    "@ai-hero/sandcastle": "^0.10.0",
+    "tsx": "^4.22.4",
+    "zod": "^4.4.3"
+  }
+}

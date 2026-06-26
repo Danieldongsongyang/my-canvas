@@ -23,6 +23,8 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
@@ -40,17 +42,29 @@ const planSchema = z.object({
 // Maximum number of plan→execute→merge cycles before stopping.
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
+const CODEX_MODEL = process.env.SANDCASTLE_CODEX_MODEL ?? "gpt-5.4";
+const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const CODEX_HOST_SESSIONS_DIR = path.join(REPO_ROOT, ".sandcastle", "codex-home", "sessions");
+const CODEX_SANDBOX_SESSIONS_DIR = "/home/agent/workspace/.sandcastle/codex-home/sessions";
+
+const codexAgent = () =>
+    sandcastle.codex(CODEX_MODEL, {
+        sessionStorage: {
+            hostSessionsDir: CODEX_HOST_SESSIONS_DIR,
+            sandboxSessionsDir: CODEX_SANDBOX_SESSIONS_DIR,
+        },
+    });
 
 // Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
+// The frontend package lives in web/, so install dependencies there.
 const hooks = {
-    sandbox: { onSandboxReady: [{ command: "npm install" }] },
+    sandbox: { onSandboxReady: [{ command: "cd web && npm install --legacy-peer-deps --no-package-lock" }] },
 };
 
 // Copy node_modules from the host into the worktree before each sandbox
 // starts. Avoids a full npm install from scratch; the hook above handles
 // platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+const copyToWorktree = ["web/node_modules"];
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -76,7 +90,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         // not write code. (Structured output requires maxIterations: 1.)
         maxIterations: 1,
         // Opus for planning: dependency analysis benefits from deeper reasoning.
-        agent: sandcastle.codex("gpt-5.4"),
+        agent: codexAgent(),
         promptFile: "./.sandcastle/plan-prompt.md",
         // Extract and validate the <plan> JSON into a typed object. Throws
         // StructuredOutputError if the tag is missing, the JSON is malformed, or
@@ -121,7 +135,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                 const implement = await sandbox.run({
                     name: "implementer",
                     maxIterations: 100,
-                    agent: sandcastle.codex("gpt-5.4"),
+                    agent: codexAgent(),
                     promptFile: "./.sandcastle/implement-prompt.md",
                     promptArgs: {
                         TASK_ID: issue.id,
@@ -135,7 +149,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                     const review = await sandbox.run({
                         name: "reviewer",
                         maxIterations: 1,
-                        agent: sandcastle.codex("gpt-5.4"),
+                        agent: codexAgent(),
                         promptFile: "./.sandcastle/review-prompt.md",
                         promptArgs: {
                             BRANCH: issue.branch,
@@ -198,7 +212,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         sandbox: docker(),
         name: "merger",
         maxIterations: 1,
-        agent: sandcastle.codex("gpt-5.4"),
+        agent: codexAgent(),
         promptFile: "./.sandcastle/merge-prompt.md",
         promptArgs: {
             // A markdown list of branch names, one per line.
