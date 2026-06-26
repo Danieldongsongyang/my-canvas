@@ -1,0 +1,6 @@
+.env
+logs/
+worktrees/
+codex-home/*
+!codex-home/
+!codex-home/config.toml
