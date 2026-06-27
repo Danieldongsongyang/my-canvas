@@ -14,23 +14,19 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
     const hydrateUser = useUserStore((state) => state.hydrateUser);
-    const loadPublicSettings = useConfigStore((state) => state.loadPublicSettings);
-    const publicSettings = useConfigStore((state) => state.publicSettings);
+    const loadUserModels = useConfigStore((state) => state.loadUserModels);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const isLoginPage = pathname === "/login" || pathname === "/admin/login";
     const isProtectedPage = ["/admin", "/asset-library", "/assets", "/canvas", "/image", "/prompts", "/video"].some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
     useEffect(() => {
-        void loadPublicSettings();
-    }, [loadPublicSettings]);
-
-    useEffect(() => {
         if (isLoginPage) return;
         void hydrateUser().then((user) => {
             if (!user && isProtectedPage) router.replace(`/login?redirect=${encodeURIComponent(`${pathname}${window.location.search}`)}`);
+            if (user) void loadUserModels(user.id);
         });
-    }, [hydrateUser, isLoginPage, isProtectedPage, pathname, router]);
+    }, [hydrateUser, isLoginPage, isProtectedPage, loadUserModels, pathname, router]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
@@ -38,23 +34,18 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
         const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
         if (!baseUrl && !apiKey) return;
-        if (!publicSettings) return;
         handledConfigParams.current = true;
         searchParams.delete("baseUrl");
         searchParams.delete("baseurl");
         searchParams.delete("apiKey");
         searchParams.delete("apikey");
         window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
-        if (!publicSettings.modelChannel.allowCustomChannel) {
-            openConfigDialog(false);
-            message.error("后台未允许用户自定义渠道，请联系管理员进行配置");
-            return;
-        }
         updateConfig("channelMode", "local");
         if (baseUrl) updateConfig("baseUrl", baseUrl);
         if (apiKey) updateConfig("apiKey", apiKey);
         openConfigDialog(false);
-    }, [message, openConfigDialog, publicSettings, updateConfig]);
+        message.success("已导入本地直连配置");
+    }, [message, openConfigDialog, updateConfig]);
 
     return <>{children}</>;
 }

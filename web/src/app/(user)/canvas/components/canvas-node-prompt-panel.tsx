@@ -35,7 +35,7 @@ type CanvasNodePromptPanelProps = {
 
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], canGenerateFromConnectedInputs = false, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
-    const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
+    const modelCosts: { model: string; credits: number }[] = [];
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
@@ -100,7 +100,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 onConfigChange={(key, value) => onConfigChange(node.id, { [key]: value })}
                                 onOpenChange={onImageSettingsOpenChange}
                             />
-                            <CanvasComposerToggle theme={theme} icon={<Camera className="size-3.5" />} label="摄影机控制" active={Boolean(node.metadata?.cameraControl)} onClick={() => onConfigChange(node.id, { cameraControl: !node.metadata?.cameraControl })} />
+                            <CanvasComposerToggle
+                                theme={theme}
+                                icon={<Camera className="size-3.5" />}
+                                label="摄影机控制"
+                                active={Boolean(node.metadata?.cameraControl)}
+                                onClick={() => onConfigChange(node.id, { cameraControl: !node.metadata?.cameraControl })}
+                            />
                             <CanvasComposerToggle theme={theme} icon={<PanelsTopLeft className="size-3.5" />} label="全景图" active={Boolean(node.metadata?.panorama)} onClick={() => onConfigChange(node.id, { panorama: !node.metadata?.panorama })} />
                             <CanvasComposerCount theme={theme} value={config.count} onChange={(count) => onConfigChange(node.id, { count })} />
                         </>
@@ -118,13 +124,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                     )}
                 </div>
-                <Button
-                    type="primary"
-                    className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    disabled={isRunning || !canSubmit}
-                    onClick={submit}
-                    aria-label="生成"
-                >
+                <Button type="primary" className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3" disabled={isRunning || !canSubmit} onClick={submit} aria-label="生成">
                     <span className="flex items-center gap-1.5">
                         <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
                             <CreditSymbol />

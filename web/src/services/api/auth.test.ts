@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchCurrentUser, login, toPersistedAuthUser } from "@/services/api/auth";
+import { fetchCurrentUser, fetchMangeUserModels, login, toPersistedAuthUser } from "@/services/api/auth";
 
 describe("auth api", () => {
     afterEach(() => {
@@ -71,6 +71,24 @@ describe("auth api", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
         expect(url).toBe("/api/user/self");
+        expect(init.credentials).toBe("include");
+        expect(new Headers(init.headers).get("New-Api-User")).toBe("42");
+    });
+
+    it("loads the current user's available models from mange-backend", async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            new Response(JSON.stringify({ success: true, code: 0, data: [" gpt-5.5 ", "seedream-4", "", "gpt-5.5"] }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+            }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(fetchMangeUserModels(42)).resolves.toEqual(["gpt-5.5", "seedream-4"]);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+        expect(url).toBe("/api/user/models");
         expect(init.credentials).toBe("include");
         expect(new Headers(init.headers).get("New-Api-User")).toBe("42");
     });

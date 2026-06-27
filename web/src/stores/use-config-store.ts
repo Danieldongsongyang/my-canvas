@@ -4,8 +4,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { apiGet } from "@/services/api/request";
-import type { AdminPublicSettings } from "@/services/api/admin";
+import { fetchMangeUserModels } from "@/services/api/auth";
 
 export type AiConfig = {
     channelMode: "remote" | "local";
@@ -49,14 +48,14 @@ export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 
 export const defaultConfig: AiConfig = {
-    channelMode: "local",
+    channelMode: "remote",
     baseUrl: "https://api.openai.com",
     apiKey: "",
-    model: "gpt-image-2",
-    imageModel: "gpt-image-2",
-    videoModel: "grok-imagine-video",
-    textModel: "gpt-5.5",
-    audioModel: "gpt-4o-mini-tts",
+    model: "",
+    imageModel: "",
+    videoModel: "",
+    textModel: "",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -66,8 +65,8 @@ export const defaultConfig: AiConfig = {
     videoGenerateAudio: "true",
     videoWatermark: "false",
     systemPrompt: "",
-    models: ["gpt-image-2"],
-    imageModels: ["gpt-image-2"],
+    models: [],
+    imageModels: [],
     videoModels: [],
     textModels: [],
     audioModels: [],
@@ -89,31 +88,31 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
 type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
-    publicSettings: AdminPublicSettings | null;
-    isPublicSettingsLoading: boolean;
+    isRemoteModelsLoading: boolean;
+    remoteModelsError: string;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
-    loadPublicSettings: () => Promise<void>;
+    loadUserModels: (userId?: string | number) => Promise<void>;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
 };
 
-function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null) {
-    const channelMode = modelChannel?.allowCustomChannel ? config.channelMode : "remote";
-    if (channelMode === "local" || !modelChannel) return { ...config, channelMode };
-    const models = modelChannel.availableModels;
+function resolveEffectiveConfig(config: AiConfig) {
+    const channelMode = config.channelMode || "remote";
+    if (channelMode === "local") return { ...config, channelMode };
+    const models = normalizeModelList(config.models);
     const textModels = filterModelsByCapability(models, "text");
     const imageModels = filterModelsByCapability(models, "image");
     const videoModels = filterModelsByCapability(models, "video");
     const audioModels = filterModelsByCapability(models, "audio");
-    const fallbackTextModel = validDefault(modelChannel.defaultTextModel, textModels) || preferredModel(textModels, isTextModelName);
-    const fallbackModel = validDefault(modelChannel.defaultModel, textModels) || fallbackTextModel;
-    const fallbackImageModel = validDefault(modelChannel.defaultImageModel, imageModels) || preferredModel(imageModels, isImageModelName);
-    const fallbackVideoModel = validDefault(modelChannel.defaultVideoModel, videoModels) || preferredModel(videoModels, isVideoModelName);
+    const fallbackTextModel = validDefault(config.textModel, textModels) || validDefault(config.model, textModels) || preferredModel(textModels, isTextModelName);
+    const fallbackModel = validDefault(config.model, textModels) || fallbackTextModel;
+    const fallbackImageModel = validDefault(config.imageModel, imageModels) || preferredModel(imageModels, isImageModelName);
+    const fallbackVideoModel = validDefault(config.videoModel, videoModels) || preferredModel(videoModels, isVideoModelName);
     const fallbackAudioModel = preferredModel(audioModels, isAudioModelName);
     return {
         ...config,
@@ -128,7 +127,6 @@ function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSetti
         videoModel: videoModels.includes(config.videoModel) ? config.videoModel : fallbackVideoModel,
         textModel: textModels.includes(config.textModel) ? config.textModel : fallbackTextModel || fallbackModel,
         audioModel: audioModels.includes(config.audioModel) ? config.audioModel : fallbackAudioModel,
-        systemPrompt: modelChannel.systemPrompt,
     };
 }
 
@@ -147,7 +145,20 @@ function isVideoModelName(model: string) {
 
 function isImageModelName(model: string) {
     const value = model.toLowerCase();
-    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("gpt-image") || value.includes("image") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
+    return (
+        !isVideoModelName(model) &&
+        !isAudioModelName(model) &&
+        (value.includes("seedream") ||
+            value.includes("gpt-image") ||
+            value.includes("image") ||
+            value.includes("dall-e") ||
+            value.includes("dalle") ||
+            value.includes("imagen") ||
+            value.includes("flux") ||
+            value.includes("sdxl") ||
+            value.includes("stable-diffusion") ||
+            value.includes("midjourney"))
+    );
 }
 
 function isAudioModelName(model: string) {
@@ -189,8 +200,8 @@ export const useConfigStore = create<ConfigStore>()(
         (set, get) => ({
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
-            publicSettings: null,
-            isPublicSettingsLoading: false,
+            isRemoteModelsLoading: false,
+            remoteModelsError: "",
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -207,16 +218,27 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
-            loadPublicSettings: async () => {
-                if (get().isPublicSettingsLoading) return;
-                set({ isPublicSettingsLoading: true });
+            loadUserModels: async (userId) => {
+                if (get().isRemoteModelsLoading) return;
+                if (!userId) {
+                    set({ remoteModelsError: "请先登录后再读取可用模型" });
+                    return;
+                }
+                set({ isRemoteModelsLoading: true, remoteModelsError: "" });
                 try {
-                    set({ publicSettings: await apiGet<AdminPublicSettings>("/api/settings") });
+                    const models = await fetchMangeUserModels(userId);
+                    const nextConfig = resolveConfigWithModels(get().config, models);
+                    set({
+                        config: nextConfig,
+                        remoteModelsError: models.length ? "" : "当前账号暂无可用模型，请在 mange-backend 中检查渠道、分组和额度配置。",
+                    });
+                } catch (error) {
+                    set({ remoteModelsError: error instanceof Error ? error.message : "读取用户可用模型失败" });
                 } finally {
-                    set({ isPublicSettingsLoading: false });
+                    set({ isRemoteModelsLoading: false });
                 }
             },
-            isAiConfigReady: (config, model) => isAiConfigReady(config, model),
+            isAiConfigReady: (config, model) => !get().remoteModelsError && isAiConfigReady(config, model),
             openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
@@ -265,8 +287,28 @@ function normalizeModelList(models: string[]) {
 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
-    const modelChannel = useConfigStore((state) => state.publicSettings?.modelChannel || null);
-    return useMemo(() => resolveEffectiveConfig(config, modelChannel), [config, modelChannel]);
+    return useMemo(() => resolveEffectiveConfig(config), [config]);
+}
+
+export function resolveConfigWithModels(config: AiConfig, models: string[]) {
+    const normalizedModels = normalizeModelList(models).sort((a, b) => a.localeCompare(b));
+    const imageModels = filterModelsByCapability(normalizedModels, "image");
+    const videoModels = filterModelsByCapability(normalizedModels, "video");
+    const textModels = filterModelsByCapability(normalizedModels, "text");
+    const audioModels = filterModelsByCapability(normalizedModels, "audio");
+    return {
+        ...config,
+        models: normalizedModels,
+        imageModels,
+        videoModels,
+        textModels,
+        audioModels,
+        model: textModels.includes(config.model) ? config.model : textModels[0] || "",
+        imageModel: imageModels.includes(config.imageModel) ? config.imageModel : imageModels[0] || "",
+        videoModel: videoModels.includes(config.videoModel) ? config.videoModel : videoModels[0] || "",
+        textModel: textModels.includes(config.textModel) ? config.textModel : textModels[0] || "",
+        audioModel: audioModels.includes(config.audioModel) ? config.audioModel : audioModels[0] || "",
+    };
 }
 
 export function buildApiUrl(baseUrl: string, path: string) {
