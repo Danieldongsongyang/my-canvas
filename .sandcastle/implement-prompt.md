@@ -28,7 +28,14 @@ Pay extra attention to test files that touch the relevant parts of the code.
 
 # EXECUTION
 
-implement directly
+**For backend code**: use RGR to complete the task.
+
+1. RED: write one test
+2. GREEN: write the implementation to pass that test
+3. REPEAT until done
+4. REFACTOR the code
+
+**For frontend code**: implement directly without RGR.
 
 # FEEDBACK LOOPS
 
