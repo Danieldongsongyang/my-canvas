@@ -1,7 +1,7 @@
-const protectedRoutePrefixes = ["/admin", "/asset-library", "/assets", "/canvas", "/image", "/prompts", "/video"];
+const protectedRoutePrefixes = ["/asset-library", "/assets", "/canvas", "/image", "/prompts", "/video"];
 
 export function isDesktopLoginRoute(pathname: string) {
-    return pathname === "/login" || pathname === "/admin/login";
+    return pathname === "/login";
 }
 
 export function isProtectedDesktopRoute(pathname: string) {

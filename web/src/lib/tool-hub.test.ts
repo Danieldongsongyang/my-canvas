@@ -18,8 +18,11 @@ describe("tool hub", () => {
         expect(createMangeBackendWebLinks("https://mange.example.com/")).toEqual([
             { key: "register", label: "注册账号", href: "https://mange.example.com/register" },
             { key: "account", label: "账号中心", href: "https://mange.example.com/user" },
+            { key: "users", label: "用户管理", href: "https://mange.example.com/user" },
             { key: "models", label: "模型管理", href: "https://mange.example.com/channel" },
             { key: "keys", label: "Key 管理", href: "https://mange.example.com/token" },
+            { key: "credits", label: "额度与用量", href: "https://mange.example.com/user" },
+            { key: "settings", label: "后台设置", href: "https://mange.example.com/user" },
         ]);
     });
 });

@@ -67,6 +67,16 @@ describe("api proxy route", () => {
         });
     });
 
+    it("rejects legacy admin api endpoints", async () => {
+        const response = await GET(createRequest(`${APP_URL}/api/admin/users`), createContext(["admin", "users"]));
+
+        expect(response.status).toBe(404);
+        await expect(response.json()).resolves.toMatchObject({
+            success: false,
+            message: UNSUPPORTED_API_MESSAGE,
+        });
+    });
+
     it("proxies mange auth endpoints with cookies and forwarded headers", async () => {
         process.env.MANGE_BACKEND_API_URL = BACKEND_API_URL;
         const fetchMock = stubFetchResponse(

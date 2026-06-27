@@ -8,9 +8,11 @@ describe("desktop route guards", () => {
         expect(isDesktopLoginRoute("/")).toBe(false);
     });
 
-    it("does not redirect the login page back to itself", () => {
+    it("does not redirect the login page back to itself or treat removed admin pages as login routes", () => {
         expect(isDesktopLoginRoute("/login")).toBe(true);
+        expect(isDesktopLoginRoute("/admin/login")).toBe(false);
         expect(isProtectedDesktopRoute("/login")).toBe(false);
+        expect(isProtectedDesktopRoute("/admin")).toBe(false);
     });
 
     it("builds a safe login redirect for protected pages with search params", () => {

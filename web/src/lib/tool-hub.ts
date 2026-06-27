@@ -10,7 +10,7 @@ export type ToolHubTool = {
 };
 
 export type MangeBackendWebLink = {
-    key: "register" | "account" | "models" | "keys";
+    key: "register" | "account" | "users" | "models" | "keys" | "credits" | "settings";
     label: string;
     href: string;
 };
@@ -39,7 +39,10 @@ export function createMangeBackendWebLinks(baseUrl = MANGE_BACKEND_WEB_URL): Man
     return [
         { key: "register", label: "注册账号", href: `${base}/register` },
         { key: "account", label: "账号中心", href: `${base}/user` },
+        { key: "users", label: "用户管理", href: `${base}/user` },
         { key: "models", label: "模型管理", href: `${base}/channel` },
         { key: "keys", label: "Key 管理", href: `${base}/token` },
+        { key: "credits", label: "额度与用量", href: `${base}/user` },
+        { key: "settings", label: "后台设置", href: `${base}/user` },
     ];
 }
