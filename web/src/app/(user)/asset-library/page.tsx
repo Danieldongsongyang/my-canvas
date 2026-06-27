@@ -6,8 +6,7 @@ import { Button, Card, Drawer, Empty, Image, Input, Pagination, Tag, Typography 
 import { saveAs } from "file-saver";
 
 import { useCopyText } from "@/hooks/use-copy-text";
-import { formatBytes } from "@/lib/image-utils";
-import { getAssetCoverUrl, queryLocalAssetLibrary } from "@/lib/local-asset-library";
+import { getAssetCardSummary, getAssetCoverUrl, getAssetDetailSummary, getAssetFallbackText, getAssetKindLabel, queryLocalAssetLibrary } from "@/lib/local-asset-library";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 
@@ -46,8 +45,8 @@ export default function AssetLibraryPage() {
     };
 
     const downloadAsset = (asset: Asset) => {
-        if (asset.kind !== "image" && asset.kind !== "video") return;
-        saveAs(asset.kind === "video" ? asset.data.url : asset.data.dataUrl, `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`);
+        if (!isDownloadableAsset(asset)) return;
+        saveAs(getAssetDownloadUrl(asset), getAssetDownloadFileName(asset));
     };
 
     return (
@@ -142,19 +141,13 @@ export default function AssetLibraryPage() {
             <Drawer title="素材详情" open={Boolean(selectedAsset)} size="large" onClose={() => setSelectedAsset(null)}>
                 {selectedAsset ? (
                     <div className="space-y-5">
-                        {selectedAsset.kind === "video" ? (
-                            <video src={selectedAsset.data.url} controls className="aspect-video w-full rounded-lg bg-black" />
-                        ) : getAssetCoverUrl(selectedAsset) ? (
-                            <Image src={getAssetCoverUrl(selectedAsset)} alt={selectedAsset.title} className="rounded-lg" />
-                        ) : (
-                            <div className="rounded-lg border border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">{selectedAsset.kind === "text" ? selectedAsset.data.content : "暂无封面"}</div>
-                        )}
+                        <AssetDetailMedia asset={selectedAsset} />
                         <div>
                             <Typography.Title level={4} className="!mb-2">
                                 {selectedAsset.title}
                             </Typography.Title>
                             <div className="flex flex-wrap gap-1.5">
-                                <Tag>{selectedAsset.kind === "image" ? "图片" : selectedAsset.kind === "video" ? "视频" : "文本"}</Tag>
+                                <Tag>{getAssetKindLabel(selectedAsset.kind)}</Tag>
                                 {selectedAsset.tags.map((tag) => (
                                     <Tag key={tag}>{tag}</Tag>
                                 ))}
@@ -165,11 +158,9 @@ export default function AssetLibraryPage() {
                                 内容
                             </Typography.Text>
                             {selectedAsset.kind === "text" ? (
-                                <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{selectedAsset.data.content}</Typography.Paragraph>
+                                <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{getAssetDetailSummary(selectedAsset)}</Typography.Paragraph>
                             ) : (
-                                <Typography.Text className="mt-2 block">
-                                    {selectedAsset.data.width}x{selectedAsset.data.height} · {formatBytes(selectedAsset.data.bytes)} · {selectedAsset.data.mimeType}
-                                </Typography.Text>
+                                <Typography.Text className="mt-2 block">{getAssetDetailSummary(selectedAsset)}</Typography.Text>
                             )}
                         </div>
                         {selectedAsset.note ? <Typography.Paragraph type="secondary">{selectedAsset.note}</Typography.Paragraph> : null}
@@ -180,7 +171,7 @@ export default function AssetLibraryPage() {
                                 </Button>
                             ) : (
                                 <Button type="primary" icon={<Download className="size-4" />} onClick={() => downloadAsset(selectedAsset)}>
-                                    {selectedAsset.kind === "video" ? "下载视频" : "下载图片"}
+                                    {getAssetDownloadActionLabel(selectedAsset)}
                                 </Button>
                             )}
                         </div>
@@ -192,7 +183,6 @@ export default function AssetLibraryPage() {
 }
 
 function LibraryCard({ asset, onOpen, onCopy, onDownload }: { asset: Asset; onOpen: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void }) {
-    const cover = getAssetCoverUrl(asset);
     return (
         <Card
             hoverable
@@ -200,13 +190,7 @@ function LibraryCard({ asset, onOpen, onCopy, onDownload }: { asset: Asset; onOp
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
-                    {asset.kind === "video" ? (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-950 p-5 text-center text-sm text-white">视频素材</div>
-                    ) : cover ? (
-                        <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
-                    ) : (
-                        <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : "暂无封面"}</div>
-                    )}
+                    <LibraryCardCover asset={asset} />
                 </button>
             }
         >
@@ -214,10 +198,10 @@ function LibraryCard({ asset, onOpen, onCopy, onDownload }: { asset: Asset; onOp
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <h2 className="line-clamp-1 text-sm font-semibold text-stone-950 dark:text-stone-100">{asset.title}</h2>
-                        <Tag className="m-0 shrink-0 text-[11px]">{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
+                        <Tag className="m-0 shrink-0 text-[11px]">{getAssetKindLabel(asset.kind)}</Tag>
                     </div>
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-2 !text-xs !leading-5">
-                        {asset.kind === "text" ? asset.data.content : `${asset.data.width}x${asset.data.height} · ${formatBytes(asset.data.bytes)}`}
+                        {getAssetCardSummary(asset)}
                     </Typography.Paragraph>
                     <div className="mt-3 flex flex-wrap gap-1.5">
                         {asset.tags.slice(0, 3).map((tag) => (
@@ -245,4 +229,50 @@ function LibraryCard({ asset, onOpen, onCopy, onDownload }: { asset: Asset; onOp
             </div>
         </Card>
     );
+}
+
+type DownloadableAsset = Extract<Asset, { kind: "image" | "video" }>;
+
+function isDownloadableAsset(asset: Asset): asset is DownloadableAsset {
+    return asset.kind === "image" || asset.kind === "video";
+}
+
+function getAssetDownloadUrl(asset: DownloadableAsset) {
+    if (asset.kind === "video") return asset.data.url;
+    return asset.data.dataUrl;
+}
+
+function getAssetDownloadFileName(asset: DownloadableAsset) {
+    return `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || "png"}`;
+}
+
+function getAssetDownloadActionLabel(asset: DownloadableAsset) {
+    if (asset.kind === "video") return "下载视频";
+    return "下载图片";
+}
+
+function AssetDetailMedia({ asset }: { asset: Asset }) {
+    if (asset.kind === "video") {
+        return <video src={asset.data.url} controls className="aspect-video w-full rounded-lg bg-black" />;
+    }
+
+    const cover = getAssetCoverUrl(asset);
+    if (cover) {
+        return <Image src={cover} alt={asset.title} className="rounded-lg" />;
+    }
+
+    return <div className="rounded-lg border border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">{getAssetFallbackText(asset)}</div>;
+}
+
+function LibraryCardCover({ asset }: { asset: Asset }) {
+    if (asset.kind === "video") {
+        return <div className="flex aspect-[4/3] items-center justify-center bg-stone-950 p-5 text-center text-sm text-white">视频素材</div>;
+    }
+
+    const cover = getAssetCoverUrl(asset);
+    if (cover) {
+        return <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />;
+    }
+
+    return <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{getAssetFallbackText(asset)}</div>;
 }

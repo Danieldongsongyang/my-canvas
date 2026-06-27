@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Asset } from "@/stores/use-asset-store";
 
-import { queryLocalAssetLibrary, toInsertAssetPayload } from "./local-asset-library";
+import { getAssetCardSummary, getAssetCoverUrl, getAssetDetailSummary, getAssetFallbackText, getAssetKindLabel, queryLocalAssetLibrary, toInsertAssetPayload } from "./local-asset-library";
 
 const assets: Asset[] = [
     {
@@ -105,5 +105,19 @@ describe("local asset library", () => {
             width: 1920,
             height: 1080,
         });
+    });
+
+    it("formats local asset labels, covers and summaries for UI consumers", () => {
+        expect(getAssetKindLabel("text")).toBe("文本");
+        expect(getAssetKindLabel("image")).toBe("图片");
+        expect(getAssetKindLabel("video")).toBe("视频");
+
+        expect(getAssetCoverUrl(assets[0])).toBe("");
+        expect(getAssetCoverUrl(assets[1])).toBe("https://example.com/cover.png");
+        expect(getAssetFallbackText(assets[0])).toBe("一句品牌文案");
+        expect(getAssetFallbackText(assets[1])).toBe("暂无封面");
+
+        expect(getAssetCardSummary(assets[1])).toBe("1280x720 · 1.0 KB");
+        expect(getAssetDetailSummary(assets[2])).toBe("1920x1080 · 2.0 KB · video/mp4");
     });
 });

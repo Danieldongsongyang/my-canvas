@@ -1,3 +1,4 @@
+import { formatBytes } from "@/lib/image-utils";
 import type { Asset, AssetKind } from "@/stores/use-asset-store";
 
 type LocalAssetLibraryQuery = {
@@ -14,7 +15,10 @@ type LocalAssetLibraryResult = {
     total: number;
 };
 
-type InsertAssetPayload = { kind: "text"; content: string; title: string } | { kind: "image"; dataUrl: string; title: string; storageKey?: string } | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
+export type InsertAssetPayload =
+    | { kind: "text"; content: string; title: string }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
+    | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
 
 const libraryKinds: AssetKind[] = ["text", "image", "video"];
 
@@ -26,11 +30,9 @@ export function queryLocalAssetLibrary(assets: Asset[], query: LocalAssetLibrary
     const normalizedKeyword = query.keyword?.trim().toLowerCase() || "";
     const normalizedTags = query.tags?.filter(Boolean) || [];
 
-    const baseFiltered = validAssets
-        .filter((asset) => !normalizedKind || asset.kind === normalizedKind)
-        .filter((asset) => !normalizedKeyword || assetSearchText(asset).includes(normalizedKeyword));
+    const baseFiltered = validAssets.filter((asset) => matchesKind(asset, normalizedKind) && matchesKeyword(asset, normalizedKeyword));
 
-    const filtered = baseFiltered.filter((asset) => normalizedTags.length === 0 || normalizedTags.every((tag) => asset.tags.includes(tag)));
+    const filtered = baseFiltered.filter((asset) => matchesTags(asset, normalizedTags));
 
     return {
         items: filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -68,6 +70,44 @@ export function getAssetCoverUrl(asset: Asset) {
     return "";
 }
 
+export function getAssetKindLabel(kind: AssetKind) {
+    switch (kind) {
+        case "image":
+            return "图片";
+        case "video":
+            return "视频";
+        case "text":
+            return "文本";
+    }
+}
+
+export function getAssetFallbackText(asset: Asset) {
+    if (asset.kind === "text") return asset.data.content;
+    return "暂无封面";
+}
+
+export function getAssetCardSummary(asset: Asset) {
+    if (asset.kind === "text") return asset.data.content;
+    return `${asset.data.width}x${asset.data.height} · ${formatBytes(asset.data.bytes)}`;
+}
+
+export function getAssetDetailSummary(asset: Asset) {
+    if (asset.kind === "text") return asset.data.content;
+    return `${asset.data.width}x${asset.data.height} · ${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
+}
+
 function assetSearchText(asset: Asset) {
     return [asset.title, asset.source || "", asset.note || "", asset.tags.join(" "), asset.kind === "text" ? asset.data.content : asset.data.mimeType].join(" ").toLowerCase();
+}
+
+function matchesKind(asset: Asset, kind: AssetKind | "") {
+    return !kind || asset.kind === kind;
+}
+
+function matchesKeyword(asset: Asset, keyword: string) {
+    return !keyword || assetSearchText(asset).includes(keyword);
+}
+
+function matchesTags(asset: Asset, tags: string[]) {
+    return tags.length === 0 || tags.every((tag) => asset.tags.includes(tag));
 }
