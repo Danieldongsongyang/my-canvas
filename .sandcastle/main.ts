@@ -33,7 +33,13 @@ import { z } from "zod";
 // Schema validator works just as well — Valibot, ArkType, etc. See
 // https://standardschema.dev.
 const planSchema = z.object({
-    issues: z.array(z.object({ id: z.string(), title: z.string(), branch: z.string() })),
+    issues: z.array(
+        z.object({
+            id: z.union([z.string(), z.number()]).transform((value) => String(value)),
+            title: z.string(),
+            branch: z.string(),
+        }),
+    ),
 });
 
 // ---------------------------------------------------------------------------
