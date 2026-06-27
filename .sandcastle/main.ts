@@ -23,6 +23,7 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -42,13 +43,112 @@ const planSchema = z.object({
 // Maximum number of plan→execute→merge cycles before stopping.
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
-const CODEX_MODEL = process.env.SANDCASTLE_CODEX_MODEL ?? "gpt-5.4";
+const DEFAULT_CODEX_MODEL = process.env.SANDCASTLE_CODEX_MODEL ?? "gpt-5.4";
+const IMPLEMENT_CODEX_MODEL = process.env.SANDCASTLE_IMPLEMENT_MODEL ?? DEFAULT_CODEX_MODEL;
+const REVIEW_CODEX_MODEL = process.env.SANDCASTLE_REVIEW_MODEL ?? "gpt-5.5";
+const REVIEW_CODEX_EFFORT = "xhigh";
 const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const WORKTREES_DIR = path.join(REPO_ROOT, ".sandcastle", "worktrees");
 const CODEX_HOST_SESSIONS_DIR = path.join(REPO_ROOT, ".sandcastle", "codex-home", "sessions");
 const CODEX_SANDBOX_SESSIONS_DIR = "/home/agent/workspace/.sandcastle/codex-home/sessions";
 
-const codexAgent = () =>
-    sandcastle.codex(CODEX_MODEL, {
+type WorktreeEntry = {
+    path: string;
+    branch?: string;
+};
+
+const git = (args: string[], cwd = REPO_ROOT): Promise<string> =>
+    new Promise((resolve, reject) => {
+        execFile("git", args, { cwd, maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+            if (error) {
+                reject(new Error(stderr.trim() || error.message));
+                return;
+            }
+
+            resolve(stdout.trim());
+        });
+    });
+
+const gitSucceeds = async (args: string[], cwd = REPO_ROOT) => {
+    try {
+        await git(args, cwd);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const listWorktrees = async (): Promise<WorktreeEntry[]> => {
+    const output = await git(["worktree", "list", "--porcelain"]);
+    const entries: WorktreeEntry[] = [];
+    let current: WorktreeEntry | undefined;
+
+    for (const line of output.split("\n")) {
+        if (line.startsWith("worktree ")) {
+            if (current) {
+                entries.push(current);
+            }
+            current = { path: line.slice("worktree ".length).trim() };
+        } else if (current && line.startsWith("branch refs/heads/")) {
+            current.branch = line.slice("branch refs/heads/".length).trim();
+        }
+    }
+
+    if (current) {
+        entries.push(current);
+    }
+
+    return entries;
+};
+
+const isManagedWorktreePath = (worktreePath: string) => {
+    const relative = path.relative(WORKTREES_DIR, worktreePath);
+    return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+};
+
+const ensureIssueBranchStartsFromCurrentHead = async (branch: string) => {
+    const branchExists = await gitSucceeds(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+    if (!branchExists) {
+        return;
+    }
+
+    const branchContainsCurrentHead = await gitSucceeds(["merge-base", "--is-ancestor", "HEAD", branch]);
+    if (branchContainsCurrentHead) {
+        return;
+    }
+
+    const branchIsAncestorOfCurrentHead = await gitSucceeds(["merge-base", "--is-ancestor", branch, "HEAD"]);
+    if (!branchIsAncestorOfCurrentHead) {
+        throw new Error(
+            `Branch '${branch}' does not contain the current HEAD and has commits not merged here. ` +
+                "Preserving it; merge/rebase it or choose a fresh branch before rerunning Sandcastle.",
+        );
+    }
+
+    const worktree = (await listWorktrees()).find((entry) => entry.branch === branch);
+    if (worktree) {
+        if (!isManagedWorktreePath(worktree.path)) {
+            throw new Error(`Branch '${branch}' is checked out outside .sandcastle/worktrees at ${worktree.path}.`);
+        }
+
+        const status = await git(["status", "--porcelain=v1", "--untracked-files=all"], worktree.path);
+        if (status.length > 0) {
+            throw new Error(`Branch '${branch}' has uncommitted changes in ${worktree.path}; preserving it.`);
+        }
+
+        console.log(`[preflight] Removing stale clean worktree for ${branch}: ${worktree.path}`);
+        await git(["worktree", "remove", worktree.path]);
+    }
+
+    console.log(`[preflight] Removing stale local branch ${branch}; it is behind the current HEAD.`);
+    await git(["branch", "-d", branch]);
+};
+
+type CodexEffort = "low" | "medium" | "high" | "xhigh";
+
+const codexAgent = (model = DEFAULT_CODEX_MODEL, effort?: CodexEffort) =>
+    sandcastle.codex(model, {
+        effort,
         sessionStorage: {
             hostSessionsDir: CODEX_HOST_SESSIONS_DIR,
             sandboxSessionsDir: CODEX_SANDBOX_SESSIONS_DIR,
@@ -123,8 +223,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
     const settled = await Promise.allSettled(
         issues.map(async (issue) => {
+            await ensureIssueBranchStartsFromCurrentHead(issue.branch);
+
             const sandbox = await sandcastle.createSandbox({
                 branch: issue.branch,
+                baseBranch: "HEAD",
                 sandbox: docker(),
                 hooks,
                 copyToWorktree,
@@ -135,7 +238,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                 const implement = await sandbox.run({
                     name: "implementer",
                     maxIterations: 100,
-                    agent: codexAgent(),
+                    agent: codexAgent(IMPLEMENT_CODEX_MODEL),
                     promptFile: "./.sandcastle/implement-prompt.md",
                     promptArgs: {
                         TASK_ID: issue.id,
@@ -149,7 +252,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                     const review = await sandbox.run({
                         name: "reviewer",
                         maxIterations: 1,
-                        agent: codexAgent(),
+                        agent: codexAgent(REVIEW_CODEX_MODEL, REVIEW_CODEX_EFFORT),
                         promptFile: "./.sandcastle/review-prompt.md",
                         promptArgs: {
                             BRANCH: issue.branch,
