@@ -85,6 +85,14 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     lastSyncedAt: "",
 };
 
+export function normalizePersistedWebdavConfig(config?: Partial<WebdavSyncConfig>): WebdavSyncConfig {
+    return {
+        ...defaultWebdavSyncConfig,
+        ...config,
+        proxyMode: "direct",
+    };
+}
+
 type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
@@ -253,7 +261,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const config = { ...defaultConfig, ...persistedConfig };
                 return {
                     ...current,
-                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
+                    webdav: normalizePersistedWebdavConfig(persistedWebdav),
                     config: {
                         ...config,
                         channelMode: config.channelMode || "remote",

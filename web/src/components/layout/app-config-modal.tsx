@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Form, Input, Modal, Progress, Segmented, Select } from "antd";
+import { Alert, App, Button, Form, Input, Modal, Progress, Segmented, Select } from "antd";
 import { Cloud, RefreshCw, Wifi } from "lucide-react";
 import { useState } from "react";
 
@@ -265,22 +265,18 @@ export function AppConfigModal() {
                                     <Cloud className="size-4" />
                                     WebDAV 同步
                                 </div>
-                                <div className="mt-1 text-xs text-stone-500">同步画布、我的素材、生成记录和本地媒体文件，不包含 AI API Key；服务不支持 CORS 时可走 Next.js 转发。</div>
+                                <div className="mt-1 text-xs text-stone-500">同步画布、我的素材、生成记录和本地媒体文件，不包含 AI API Key。桌面端第一阶段仅保留前端直连，若服务端不支持 CORS，WebDAV 不作为核心链路。</div>
                             </div>
                             <div className="text-xs text-stone-500">{webdav.lastSyncedAt ? `上次同步 ${formatWebdavTime(webdav.lastSyncedAt)}` : "尚未同步"}</div>
                         </div>
+                        <Alert
+                            showIcon
+                            type="info"
+                            className="mb-4"
+                            message="WebDAV 为可选同步能力"
+                            description="登录、工具入口页、画布打开和远程 AI 请求都不依赖 WebDAV。后续若需要受控代理能力，再通过 Electron IPC 单独设计。"
+                        />
                         <div className="grid gap-4 md:grid-cols-2">
-                            <Form.Item label="连接方式" className="mb-4 md:col-span-2">
-                                <Segmented
-                                    block
-                                    value={webdav.proxyMode}
-                                    onChange={(value) => updateWebdavConfig("proxyMode", value as typeof webdav.proxyMode)}
-                                    options={[
-                                        { label: "前端直连", value: "direct" },
-                                        { label: "Next.js 转发", value: "nextjs" },
-                                    ]}
-                                />
-                            </Form.Item>
                             <Form.Item label="WebDAV 地址" className="mb-4">
                                 <Input value={webdav.url} placeholder="https://nas.example.com/webdav" onChange={(event) => updateWebdavConfig("url", event.target.value)} />
                             </Form.Item>

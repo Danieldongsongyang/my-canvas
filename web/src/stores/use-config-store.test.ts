@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultConfig, resolveConfigWithModels, selectableModelsByCapability } from "@/stores/use-config-store";
+import { defaultConfig, normalizePersistedWebdavConfig, resolveConfigWithModels, selectableModelsByCapability } from "@/stores/use-config-store";
 
 describe("config model resolution", () => {
     it("builds remote model selections from the current user's available models", () => {
@@ -43,5 +43,21 @@ describe("config model resolution", () => {
         expect(config.model).toBe("claude-sonnet-5");
         expect(config.textModel).toBe("claude-sonnet-5");
         expect(config.imageModel).toBe("gpt-image-2");
+    });
+});
+
+describe("webdav config normalization", () => {
+    it("downgrades persisted nextjs proxy mode to direct", () => {
+        expect(
+            normalizePersistedWebdavConfig({
+                proxyMode: "nextjs",
+                url: "https://dav.example.com",
+                directory: "canvas",
+            }),
+        ).toMatchObject({
+            proxyMode: "direct",
+            url: "https://dav.example.com",
+            directory: "canvas",
+        });
     });
 });
