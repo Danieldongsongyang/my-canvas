@@ -15,11 +15,11 @@ export function buildLoginRedirect(pathname: string, search = "") {
 }
 
 export function resolveDesktopStartupRedirect(pathname: string, search: string, hasUser: boolean) {
-    if (hasUser) {
-        return isDesktopLoginRoute(pathname) ? "/" : null;
+    if (hasUser && isDesktopLoginRoute(pathname)) {
+        return "/";
     }
 
-    if (isProtectedDesktopRoute(pathname)) {
+    if (!hasUser && isProtectedDesktopRoute(pathname)) {
         return buildLoginRedirect(pathname, search);
     }
 
