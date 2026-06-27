@@ -28,6 +28,11 @@ export type CanvasRelayToken = {
     relay_proxy_prefix: string;
 };
 
+const TWO_FACTOR_LOGIN_ERROR = "当前账号开启了二次验证，桌面端第一阶段暂不支持，请先在 mange-backend 网页端完成登录设置或改用用户名密码账号。";
+const UNSUPPORTED_LOGIN_METHOD_ERROR = "桌面端第一阶段暂不支持 OAuth 或 Passkey 登录，请在 mange-backend 网页端完成账号绑定后使用用户名密码登录。";
+const TWO_FACTOR_LOGIN_MESSAGE_RE = /(2fa|mfa|totp|otp|two[- ]?factor|二次验证|两步验证|验证码)/i;
+const UNSUPPORTED_LOGIN_METHOD_MESSAGE_RE = /(oauth|passkey|webauthn|第三方|通行密钥)/i;
+
 type MangeApiResponse<T> = {
     success?: boolean;
     code?: number;
@@ -78,7 +83,7 @@ export async function ensureCanvasRelayToken(userId?: string | number) {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            ...(userId ? { "New-Api-User": String(userId) } : {}),
+            ...userAuthHeaders(userId),
         },
         credentials: "include",
         body: "{}",
@@ -90,7 +95,7 @@ export async function ensureCanvasRelayToken(userId?: string | number) {
     return payload.data;
 }
 
-export function userAuthHeaders(userId?: string | number) {
+export function userAuthHeaders(userId?: string | number): Record<string, string> {
     return userId ? { "New-Api-User": String(userId) } : {};
 }
 
@@ -130,15 +135,14 @@ async function mangeRequest<T>(url: string, init: RequestInit, userId?: string |
     return payload.data as T;
 }
 
-function readMangeErrorMessage<T>(url: string, payload: MangeApiResponse<T>) {
+function readMangeErrorMessage(url: string, payload: MangeApiResponse<unknown>) {
     const message = payload.message || payload.msg || "请求失败";
     if (url !== "/api/user/login") return message;
-    const lowerMessage = message.toLowerCase();
-    if (/(2fa|mfa|totp|otp|two[- ]?factor|二次验证|两步验证|验证码)/i.test(lowerMessage)) {
-        return "当前账号开启了二次验证，桌面端第一阶段暂不支持，请先在 mange-backend 网页端完成登录设置或改用用户名密码账号。";
+    if (TWO_FACTOR_LOGIN_MESSAGE_RE.test(message)) {
+        return TWO_FACTOR_LOGIN_ERROR;
     }
-    if (/(oauth|passkey|webauthn|第三方|通行密钥)/i.test(lowerMessage)) {
-        return "桌面端第一阶段暂不支持 OAuth 或 Passkey 登录，请在 mange-backend 网页端完成账号绑定后使用用户名密码登录。";
+    if (UNSUPPORTED_LOGIN_METHOD_MESSAGE_RE.test(message)) {
+        return UNSUPPORTED_LOGIN_METHOD_ERROR;
     }
     return message;
 }
