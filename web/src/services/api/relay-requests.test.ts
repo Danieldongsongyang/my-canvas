@@ -61,6 +61,10 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/services
 import { createVideoGenerationTask, pollVideoGenerationTask } from "@/services/api/video";
 import type { AiConfig } from "@/stores/use-config-store";
 
+type AxiosRequestOptions = {
+    headers?: Record<string, string>;
+};
+
 const remoteConfig: AiConfig = {
     channelMode: "remote",
     baseUrl: "https://api.openai.com",
@@ -96,6 +100,18 @@ const remoteVideoConfig: AiConfig = {
     videoModel: "sora-1",
 };
 
+function postHeaders(callIndex: number) {
+    return requestHeaders(axiosMocks.post.mock.calls[callIndex]?.[2]);
+}
+
+function getHeaders(callIndex: number) {
+    return requestHeaders(axiosMocks.get.mock.calls[callIndex]?.[1]);
+}
+
+function requestHeaders(options: unknown): Record<string, string> {
+    return (options as AxiosRequestOptions | undefined)?.headers ?? {};
+}
+
 describe("relay-backed canvas api requests", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -109,7 +125,7 @@ describe("relay-backed canvas api requests", () => {
         axiosMocks.post
             .mockResolvedValueOnce({ data: { data: [{ b64_json: "AAA" }] } })
             .mockResolvedValueOnce({ data: { data: [{ b64_json: "BBB" }] } })
-            .mockResolvedValueOnce({ data: "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\n data: [DONE]\n\n" });
+            .mockResolvedValueOnce({ data: 'data: {"choices":[{"delta":{"content":"你好"}}]}\n\n data: [DONE]\n\n' });
 
         await requestGeneration(remoteConfig, "生成一张图");
         await requestEdit(remoteConfig, "改一下图片", [{ id: "ref-1", name: "ref.png", type: "image/png", dataUrl: "data:image/png;base64,AAA" }]);
@@ -127,7 +143,7 @@ describe("relay-backed canvas api requests", () => {
                 withCredentials: true,
             }),
         );
-        expect((axiosMocks.post.mock.calls[0]?.[2] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
+        expect(postHeaders(0)).not.toHaveProperty("Authorization");
 
         expect(axiosMocks.post).toHaveBeenNthCalledWith(
             2,
@@ -138,7 +154,7 @@ describe("relay-backed canvas api requests", () => {
                 withCredentials: true,
             }),
         );
-        expect((axiosMocks.post.mock.calls[1]?.[2] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
+        expect(postHeaders(1)).not.toHaveProperty("Authorization");
 
         expect(axiosMocks.post).toHaveBeenNthCalledWith(
             3,
@@ -150,7 +166,7 @@ describe("relay-backed canvas api requests", () => {
                 responseType: "text",
             }),
         );
-        expect((axiosMocks.post.mock.calls[2]?.[2] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
+        expect(postHeaders(2)).not.toHaveProperty("Authorization");
     });
 
     it("re-initializes relay and keeps remote audio requests on canvas relay without bearer keys", async () => {
@@ -169,14 +185,13 @@ describe("relay-backed canvas api requests", () => {
                 withCredentials: true,
             }),
         );
-        expect((axiosMocks.post.mock.calls[0]?.[2] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
+        expect(postHeaders(0)).not.toHaveProperty("Authorization");
     });
 
     it("re-initializes relay and uses relay create/query/content routes for remote video requests", async () => {
         axiosMocks.post.mockResolvedValue({ data: { id: "task-1", status: "queued" } });
-        axiosMocks.get
-            .mockResolvedValueOnce({ data: { id: "task-1", status: "completed" } })
-            .mockResolvedValueOnce({ data: new Blob(["video"], { type: "video/mp4" }) });
+        axiosMocks.get.mockResolvedValueOnce({ data: { id: "task-1", status: "completed" } });
+        axiosMocks.get.mockResolvedValueOnce({ data: new Blob(["video"], { type: "video/mp4" }) });
 
         const task = await createVideoGenerationTask(remoteVideoConfig, "生成视频");
         const state = await pollVideoGenerationTask(remoteVideoConfig, task);
@@ -193,7 +208,7 @@ describe("relay-backed canvas api requests", () => {
                 withCredentials: true,
             }),
         );
-        expect((axiosMocks.post.mock.calls[0]?.[2] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
+        expect(postHeaders(0)).not.toHaveProperty("Authorization");
 
         expect(axiosMocks.get).toHaveBeenNthCalledWith(
             1,
@@ -214,7 +229,7 @@ describe("relay-backed canvas api requests", () => {
                 withCredentials: true,
             }),
         );
-        expect((axiosMocks.get.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
-        expect((axiosMocks.get.mock.calls[1]?.[1] as { headers: Record<string, string> }).headers.Authorization).toBeUndefined();
+        expect(getHeaders(0)).not.toHaveProperty("Authorization");
+        expect(getHeaders(1)).not.toHaveProperty("Authorization");
     });
 });

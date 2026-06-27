@@ -1,8 +1,8 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
-import { userAuthHeaders } from "@/services/api/auth";
-import { ensureRemoteRelayUserId, refreshRemoteUserSession } from "@/services/api/canvas-relay";
+import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
+import { ensureRemoteRelayUserId } from "@/services/api/canvas-relay";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
@@ -23,26 +23,6 @@ type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
-
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
-}
-
-async function aiHeaders(config: AiConfig, contentType?: string) {
-    return config.channelMode === "remote"
-        ? {
-              ...userAuthHeaders(await ensureRemoteRelayUserId()),
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          };
-}
-
-function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") refreshRemoteUserSession();
-}
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = []): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences);
@@ -85,13 +65,14 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     body.append("model", model);
     body.append("prompt", prompt);
     body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
-    if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
+    const size = normalizeVideoSize(config.size);
+    if (size) body.append("size", size);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
     body.append("preset", "normal");
     const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => body.append("input_reference[]", file));
     try {
-        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: await aiHeaders(config), withCredentials: true })).data);
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: await aiRequestHeaders(config), withCredentials: true })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         return { id: created.id, provider: "openai", model };
     } catch (error) {
@@ -101,7 +82,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask): Promise<VideoGenerationTaskState> {
     try {
-        const headers = await aiHeaders(config);
+        const headers = await aiRequestHeaders(config);
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers, params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data);
         if (video.status === "completed") {
             const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers, params: config.channelMode === "remote" ? { model: task.model } : undefined, responseType: "blob", withCredentials: true });
@@ -135,7 +116,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     };
 
     try {
-        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: await aiHeaders(config, "application/json"), withCredentials: true })).data);
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: await aiRequestHeaders(config, "application/json"), withCredentials: true })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
@@ -145,7 +126,9 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: await aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data);
+        const state = unwrapSeedanceTask(
+            (await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: await aiRequestHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data,
+        );
         if (state.status === "succeeded") {
             const url = state.content?.video_url;
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };

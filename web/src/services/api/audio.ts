@@ -1,30 +1,9 @@
 import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
-import { userAuthHeaders } from "@/services/api/auth";
-import { ensureRemoteRelayUserId, refreshRemoteUserSession } from "@/services/api/canvas-relay";
+import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
-
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
-}
-
-async function aiHeaders(config: AiConfig) {
-    return config.channelMode === "remote"
-        ? {
-              ...userAuthHeaders(await ensureRemoteRelayUserId()),
-              "Content-Type": "application/json",
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              "Content-Type": "application/json",
-          };
-}
-
-function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") refreshRemoteUserSession();
-}
+import type { AiConfig } from "@/stores/use-config-store";
 
 export async function requestAudioGeneration(config: AiConfig, prompt: string): Promise<Blob> {
     const model = (config.model || config.audioModel).trim();
@@ -43,7 +22,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string): 
                 speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
                 ...(instructions ? { instructions } : {}),
             },
-            { headers: await aiHeaders(config), responseType: "blob", withCredentials: true },
+            { headers: await aiRequestHeaders(config, "application/json"), responseType: "blob", withCredentials: true },
         );
         await assertAudioBlob(response.data);
         refreshRemoteUser(config);

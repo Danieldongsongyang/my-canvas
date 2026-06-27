@@ -1,7 +1,6 @@
 import axios from "axios";
 
-import { userAuthHeaders } from "@/services/api/auth";
-import { ensureRemoteRelayUserId, refreshRemoteUserSession } from "@/services/api/canvas-relay";
+import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -185,26 +184,6 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
     return systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
 }
 
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
-}
-
-async function aiHeaders(config: AiConfig, contentType?: string) {
-    return config.channelMode === "remote"
-        ? {
-              ...userAuthHeaders(await ensureRemoteRelayUserId()),
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          };
-}
-
-function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") refreshRemoteUserSession();
-}
-
 function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) {
     const systemPrompt = config.systemPrompt.trim();
     return systemPrompt ? [{ role: "system" as const, content: systemPrompt }, ...messages] : messages;
@@ -227,7 +206,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
                 output_format: IMAGE_OUTPUT_FORMAT,
             },
             {
-                headers: await aiHeaders(config, "application/json"),
+                headers: await aiRequestHeaders(config, "application/json"),
                 withCredentials: true,
             },
         );
@@ -261,7 +240,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: await aiHeaders(config), withCredentials: true });
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: await aiRequestHeaders(config), withCredentials: true });
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
@@ -284,9 +263,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
                 stream: true,
             },
             {
-                headers: {
-                    ...(await aiHeaders(config, "application/json")),
-                } as Record<string, string>,
+                headers: await aiRequestHeaders(config, "application/json"),
                 responseType: "text",
                 withCredentials: true,
                 onDownloadProgress: (event) => {
