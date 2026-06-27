@@ -36,13 +36,19 @@ export type AiConfig = {
 };
 
 export type WebdavSyncConfig = {
-    proxyMode: "direct" | "nextjs";
+    proxyMode: "direct";
     url: string;
     username: string;
     password: string;
     directory: string;
     lastSyncedAt: string;
 };
+
+export type PersistedWebdavSyncConfig = Partial<
+    Omit<WebdavSyncConfig, "proxyMode"> & {
+        proxyMode: WebdavSyncConfig["proxyMode"] | "nextjs";
+    }
+>;
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -85,7 +91,7 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     lastSyncedAt: "",
 };
 
-export function normalizePersistedWebdavConfig(config?: Partial<WebdavSyncConfig>): WebdavSyncConfig {
+export function normalizePersistedWebdavConfig(config?: PersistedWebdavSyncConfig): WebdavSyncConfig {
     return {
         ...defaultWebdavSyncConfig,
         ...config,
@@ -108,6 +114,8 @@ type ConfigStore = {
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
 };
+
+type PersistedConfigStore = Partial<Omit<ConfigStore, "webdav"> & { webdav: PersistedWebdavSyncConfig }>;
 
 function resolveEffectiveConfig(config: AiConfig) {
     const channelMode = config.channelMode || "remote";
@@ -255,9 +263,9 @@ export const useConfigStore = create<ConfigStore>()(
             name: CONFIG_STORE_KEY,
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
             merge: (persisted, current) => {
-                const persistedState = (persisted || {}) as Partial<ConfigStore>;
+                const persistedState = (persisted || {}) as PersistedConfigStore;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
-                const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
+                const persistedWebdav = persistedState.webdav;
                 const config = { ...defaultConfig, ...persistedConfig };
                 return {
                     ...current,

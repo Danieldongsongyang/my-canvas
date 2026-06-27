@@ -122,10 +122,11 @@ export function AppConfigModal() {
     const updateWebdavProgress = (event: AppSyncProgressEvent) => {
         setWebdavSyncStatus(event.stage);
         if (!event.domain) return;
+        const domain = event.domain;
         setWebdavDomainProgress((current) => ({
             ...current,
-            [event.domain as AppSyncDomainKey]: {
-                label: event.label || webdavDomainLabels[event.domain as AppSyncDomainKey],
+            [domain]: {
+                label: event.label || webdavDomainLabels[domain],
                 stage: event.stage,
                 current: event.current,
                 total: event.total,
@@ -269,13 +270,7 @@ export function AppConfigModal() {
                             </div>
                             <div className="text-xs text-stone-500">{webdav.lastSyncedAt ? `上次同步 ${formatWebdavTime(webdav.lastSyncedAt)}` : "尚未同步"}</div>
                         </div>
-                        <Alert
-                            showIcon
-                            type="info"
-                            className="mb-4"
-                            message="WebDAV 为可选同步能力"
-                            description="登录、工具入口页、画布打开和远程 AI 请求都不依赖 WebDAV。后续若需要受控代理能力，再通过 Electron IPC 单独设计。"
-                        />
+                        <Alert showIcon type="info" className="mb-4" message="WebDAV 为可选同步能力" description="登录、工具入口页、画布打开和远程 AI 请求都不依赖 WebDAV。后续若需要受控代理能力，再通过 Electron IPC 单独设计。" />
                         <div className="grid gap-4 md:grid-cols-2">
                             <Form.Item label="WebDAV 地址" className="mb-4">
                                 <Input value={webdav.url} placeholder="https://nas.example.com/webdav" onChange={(event) => updateWebdavConfig("url", event.target.value)} />

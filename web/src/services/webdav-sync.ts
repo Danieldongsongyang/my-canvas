@@ -55,7 +55,7 @@ async function ensureWebdavSubdirectory(config: WebdavSyncConfig, path: string) 
 
 async function ensureWebdavDirectoryPath(config: WebdavSyncConfig, directory: string) {
     const parts = normalizePath(directory).split("/").filter(Boolean);
-    const cacheKey = `${config.proxyMode}:${config.url}:${parts.join("/")}`;
+    const cacheKey = `${config.url}:${parts.join("/")}`;
     if (ensuredDirectories.has(cacheKey)) return;
     let path = "";
     for (const part of parts) {

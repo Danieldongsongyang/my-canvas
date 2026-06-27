@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { testWebdavConnection } from "@/services/webdav-sync";
-import type { WebdavSyncConfig } from "@/stores/use-config-store";
+import { normalizePersistedWebdavConfig } from "@/stores/use-config-store";
 
-const defaultConfig: WebdavSyncConfig = {
+const webdavConfig = normalizePersistedWebdavConfig({
     proxyMode: "nextjs",
     url: "https://dav.example.com/root",
     username: "demo",
     password: "secret",
     directory: "infinite-canvas",
-    lastSyncedAt: "",
-};
+});
 
 describe("webdav sync", () => {
     beforeEach(() => {
@@ -22,21 +21,18 @@ describe("webdav sync", () => {
         vi.unstubAllGlobals();
     });
 
-    it("uses direct WebDAV requests even when old nextjs proxy mode is present", async () => {
+    it("uses direct WebDAV requests after normalizing an old nextjs proxy mode", async () => {
         const fetchMock = vi
-            .fn()
+            .fn<typeof fetch>()
             .mockResolvedValueOnce(new Response(null, { status: 405 }))
             .mockResolvedValueOnce(new Response(null, { status: 207 }))
             .mockResolvedValueOnce(new Response(null, { status: 207 }));
         vi.stubGlobal("fetch", fetchMock);
 
-        await expect(testWebdavConnection(defaultConfig)).resolves.toBeUndefined();
+        await expect(testWebdavConnection(webdavConfig)).resolves.toBeUndefined();
 
         expect(fetchMock).toHaveBeenCalledTimes(3);
-        const [mkcolUrl] = fetchMock.mock.calls[0] as [string, RequestInit];
-        const [propfindUrl, propfindInit] = fetchMock.mock.calls[2] as [string, RequestInit];
-        expect(mkcolUrl).toBe("https://dav.example.com/root/infinite-canvas");
-        expect(propfindUrl).toBe("https://dav.example.com/root/infinite-canvas");
-        expect(propfindInit.method).toBe("PROPFIND");
+        expect(fetchMock).toHaveBeenNthCalledWith(1, "https://dav.example.com/root/infinite-canvas", expect.objectContaining({ method: "MKCOL" }));
+        expect(fetchMock).toHaveBeenNthCalledWith(3, "https://dav.example.com/root/infinite-canvas", expect.objectContaining({ method: "PROPFIND" }));
     });
 });

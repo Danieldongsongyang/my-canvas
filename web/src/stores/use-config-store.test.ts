@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultConfig, normalizePersistedWebdavConfig, resolveConfigWithModels, selectableModelsByCapability } from "@/stores/use-config-store";
+import { defaultConfig, defaultWebdavSyncConfig, normalizePersistedWebdavConfig, resolveConfigWithModels, selectableModelsByCapability } from "@/stores/use-config-store";
 
 describe("config model resolution", () => {
     it("builds remote model selections from the current user's available models", () => {
@@ -54,7 +54,8 @@ describe("webdav config normalization", () => {
                 url: "https://dav.example.com",
                 directory: "canvas",
             }),
-        ).toMatchObject({
+        ).toEqual({
+            ...defaultWebdavSyncConfig,
             proxyMode: "direct",
             url: "https://dav.example.com",
             directory: "canvas",
