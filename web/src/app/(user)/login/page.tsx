@@ -6,22 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { MANGE_BACKEND_WEB_URL } from "@/constant/env";
+import { safeLoginRedirect } from "@/lib/login-redirect";
 import { useUserStore } from "@/stores/use-user-store";
 
 type LoginFormValues = {
     username: string;
     password: string;
 };
-
-// 仅放行站内相对路径，拦截开放重定向。浏览器会忽略 URL 中的 Tab/换行/回车，并把
-// //host 或 /\host 解析为协议相对的跨站地址，因此先剥离控制字符，再拒绝 // 与 /\ 前缀。
-function safeRedirect(value: string | null): string {
-    const cleaned = (value ?? "").replace(/[\t\n\r]/g, "");
-    if (!cleaned.startsWith("/") || cleaned.startsWith("//") || cleaned.startsWith("/\\")) {
-        return "/";
-    }
-    return cleaned;
-}
 
 export default function LoginPage() {
     return (
@@ -37,7 +28,7 @@ function LoginContent() {
     const searchParams = useSearchParams();
     const login = useUserStore((state) => state.login);
     const isLoading = useUserStore((state) => state.isLoading);
-    const redirect = safeRedirect(searchParams.get("redirect"));
+    const redirect = safeLoginRedirect(searchParams.get("redirect"));
     const registerUrl = `${MANGE_BACKEND_WEB_URL.replace(/\/$/, "")}/register`;
 
     const submit = async (values: LoginFormValues) => {

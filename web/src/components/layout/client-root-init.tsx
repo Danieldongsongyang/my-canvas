@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { App } from "antd";
 
+import { buildLoginRedirect, isDesktopLoginRoute, isProtectedDesktopRoute } from "@/lib/desktop-routes";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -17,13 +18,13 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const loadUserModels = useConfigStore((state) => state.loadUserModels);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const isLoginPage = pathname === "/login" || pathname === "/admin/login";
-    const isProtectedPage = ["/admin", "/asset-library", "/assets", "/canvas", "/image", "/prompts", "/video"].some((path) => pathname === path || pathname.startsWith(`${path}/`));
+    const isLoginPage = isDesktopLoginRoute(pathname);
+    const isProtectedPage = isProtectedDesktopRoute(pathname);
 
     useEffect(() => {
         if (isLoginPage) return;
         void hydrateUser().then((user) => {
-            if (!user && isProtectedPage) router.replace(`/login?redirect=${encodeURIComponent(`${pathname}${window.location.search}`)}`);
+            if (!user && isProtectedPage) router.replace(buildLoginRedirect(pathname, window.location.search));
             if (user) void loadUserModels(user.id);
         });
     }, [hydrateUser, isLoginPage, isProtectedPage, loadUserModels, pathname, router]);

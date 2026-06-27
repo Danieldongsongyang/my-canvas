@@ -1,125 +1,141 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { App, Button, Image, Tag } from "antd";
+import { Button, Tag } from "antd";
+import { ArrowRight, CircleUserRound, Clapperboard, ExternalLink, KeyRound, Maximize2, SlidersHorizontal, Sparkles, UserPlus } from "lucide-react";
 
-import { fetchPrompts, type Prompt } from "@/services/api/prompts";
-import { navigationTools } from "@/constant/navigation-tools";
+import { createMangeBackendWebLinks, toolHubTools } from "@/lib/tool-hub";
 import { cn } from "@/lib/utils";
+import { useUserStore } from "@/stores/use-user-store";
 
-function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
-    return (
-        <span className="relative inline-block px-1">
-            {action === "highlight" ? (
-                <span className="absolute inset-x-0 bottom-0 top-1 rounded-sm opacity-45" style={{ backgroundColor: color }} />
-            ) : (
-                <span className="absolute inset-x-0 bottom-0 h-1 rounded-full opacity-80" style={{ backgroundColor: color }} />
-            )}
-            <span className="relative font-medium text-stone-800 dark:text-stone-200">{children}</span>
-        </span>
-    );
-}
+const backendLinks = createMangeBackendWebLinks();
+const toolIcons = {
+    canvas: Maximize2,
+    comic: Clapperboard,
+};
+const backendLinkIcons = {
+    register: UserPlus,
+    account: CircleUserRound,
+    models: SlidersHorizontal,
+    keys: KeyRound,
+};
 
 export default function IndexPage() {
-    const { message } = App.useApp();
-    const [primaryTool] = navigationTools;
-    const [promptShowcase, setPromptShowcase] = useState<Prompt[]>([]);
-    const [previewIndex, setPreviewIndex] = useState(0);
-    const [previewOpen, setPreviewOpen] = useState(false);
+    const user = useUserStore((state) => state.user);
+    const isReady = useUserStore((state) => state.isReady);
+    const isLoading = useUserStore((state) => state.isLoading);
+    const relayReady = useUserStore((state) => state.relayReady);
+    const userName = user?.displayName || user?.username || "创作者";
 
-    useEffect(() => {
-        void fetchPrompts({ pageSize: 12 })
-            .then((data) => setPromptShowcase(data.items))
-            .catch((error) => message.error(error instanceof Error ? error.message : "获取提示词失败"));
-    }, [message]);
+    if (!isReady || isLoading) {
+        return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500 dark:text-stone-400">正在恢复登录状态...</main>;
+    }
+
+    if (!user) {
+        return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500 dark:text-stone-400">正在进入登录页...</main>;
+    }
 
     return (
-        <main className="relative h-full overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] text-stone-950 dark:bg-[radial-gradient(rgba(245,245,244,.18)_1px,transparent_1px)] dark:text-stone-100">
-            <section className="relative mx-auto min-h-[calc(100vh-4rem)] max-w-7xl overflow-hidden px-6">
-                <div className="pointer-events-none absolute left-[15%] top-24 size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
-                <div className="pointer-events-none absolute right-[23%] top-[48%] size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
-
-                <div className="relative flex min-h-[620px] flex-col items-center justify-center pt-10 text-center">
-                    <h1 className="ai-title-aurora max-w-5xl text-balance text-5xl font-semibold tracking-normal sm:text-7xl lg:text-8xl">无限画布</h1>
-                    <p className="mt-8 max-w-3xl text-balance text-lg leading-8 text-stone-500 dark:text-stone-400">
-                        在
-                        <Highlighter action="underline" color="#FF9800">
-                            无限画布
-                        </Highlighter>
-                        中生成、连接和重组
-                        <Highlighter action="highlight" color="#87CEFA">
-                            图片、文字与图形
-                        </Highlighter>
-                        ，让创作从单次生成变成连续推演。
-                    </p>
-                    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-                        <Button type="primary" size="large" href={`/${primaryTool.slug}`} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            开始使用
-                        </Button>
-                        <Button size="large" href="/canvas">
-                            打开画布
-                        </Button>
+        <main className="h-full overflow-y-auto bg-background text-stone-950 dark:text-stone-100">
+            <section className="border-b border-stone-200 dark:border-stone-800">
+                <div className="mx-auto grid min-h-[260px] max-w-7xl gap-8 px-6 py-10 lg:grid-cols-[1fr_360px] lg:items-end">
+                    <div className="max-w-3xl">
+                        <Tag bordered={false} className="mb-5 bg-stone-100 text-stone-600 dark:bg-stone-900 dark:text-stone-300">
+                            {relayReady ? "云端 Relay 已就绪" : "云端 Relay 初始化中"}
+                        </Tag>
+                        <h1 className="text-4xl font-semibold tracking-normal sm:text-5xl">你好，{userName}</h1>
+                        <p className="mt-5 max-w-2xl text-base leading-8 text-stone-500 dark:text-stone-400">这里是桌面端的 AI 工具入口。画布、本地素材和后续新增流程都从这里进入，账号与模型配置继续交给 mange-backend 网页端。</p>
                     </div>
-                </div>
-
-                <section className="relative mx-auto mb-20 max-w-6xl border-t border-stone-200 pt-12 dark:border-stone-800">
-                    <div className="mb-8 grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-start">
-                        <div />
-                        <div className="max-w-2xl text-center">
-                            <h2 className="text-3xl font-semibold text-stone-950 dark:text-stone-100">沉淀每一次好结果</h2>
-                            <p className="mt-3 text-base leading-7 text-stone-500 dark:text-stone-400">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
+                    <div className="grid gap-3 rounded-lg border border-stone-200 p-4 dark:border-stone-800">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                            <Sparkles className="size-4" />
+                            当前账号
                         </div>
-                        <Button type="link" href="/prompts" className="justify-self-center md:justify-self-end" icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            查看提示词库
-                        </Button>
+                        <div className="grid gap-2 text-sm text-stone-500 dark:text-stone-400">
+                            <div className="flex items-center justify-between gap-4">
+                                <span>用户名</span>
+                                <span className="truncate text-stone-900 dark:text-stone-100">{user.username}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                                <span>身份</span>
+                                <span className="text-stone-900 dark:text-stone-100">{user.role === "admin" ? "管理员" : "用户"}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                                <span>算力点</span>
+                                <span className="tabular-nums text-stone-900 dark:text-stone-100">{user.credits.toLocaleString()}</span>
+                            </div>
+                        </div>
                     </div>
-                    <div className="grid auto-rows-[210px] gap-4 md:grid-cols-4">
-                        {promptShowcase.map((item, index) => (
-                            <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => {
-                                    setPreviewIndex(index);
-                                    setPreviewOpen(true);
-                                }}
-                                className={cn(
-                                    "group relative cursor-pointer overflow-hidden border border-stone-200 bg-stone-100 text-left dark:border-stone-800 dark:bg-stone-900",
-                                    index === 0 && "md:col-span-2 md:row-span-2",
-                                    index === 3 && "md:col-span-2",
-                                )}
-                            >
-                                <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-                                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/35 to-transparent p-4 text-white">
-                                    <div className="mb-2 flex flex-wrap gap-1.5">
-                                        {item.tags.slice(0, 2).map((tag) => (
-                                            <Tag key={tag} variant="filled" className="m-0 bg-white/15 text-[11px] text-white backdrop-blur">
-                                                {tag}
-                                            </Tag>
-                                        ))}
-                                    </div>
-                                    <h3 className="text-sm font-medium">{item.title}</h3>
-                                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/75">{item.prompt}</p>
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-                </section>
-            </section>
-            <Image.PreviewGroup
-                preview={{
-                    open: previewOpen,
-                    current: previewIndex,
-                    onOpenChange: setPreviewOpen,
-                    onChange: setPreviewIndex,
-                }}
-            >
-                <div className="hidden">
-                    {promptShowcase.map((item) => (
-                        <Image key={item.id} src={item.coverUrl} alt={item.title} />
-                    ))}
                 </div>
-            </Image.PreviewGroup>
+            </section>
+
+            <section className="mx-auto grid max-w-7xl gap-8 px-6 py-10 lg:grid-cols-[1fr_360px]">
+                <div>
+                    <div className="mb-5 flex items-end justify-between gap-4">
+                        <div>
+                            <p className="text-xs text-stone-500">工具</p>
+                            <h2 className="mt-2 text-2xl font-semibold">选择工作流</h2>
+                        </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        {toolHubTools.map((tool) => {
+                            const Icon = toolIcons[tool.key];
+                            const ready = tool.status === "ready";
+                            return (
+                                <article
+                                    key={tool.key}
+                                    className={cn(
+                                        "flex min-h-[230px] flex-col justify-between rounded-lg border p-5",
+                                        ready ? "border-stone-950 bg-stone-50 dark:border-stone-100 dark:bg-stone-950" : "border-stone-200 bg-transparent dark:border-stone-800",
+                                    )}
+                                >
+                                    <div>
+                                        <div className="mb-5 flex items-center justify-between gap-3">
+                                            <span className="inline-flex size-10 items-center justify-center rounded-lg bg-stone-950 text-white dark:bg-stone-100 dark:text-stone-950">
+                                                <Icon className="size-5" />
+                                            </span>
+                                            <Tag bordered={false} className={cn("m-0", ready ? "bg-stone-950 text-white dark:bg-stone-100 dark:text-stone-950" : "bg-stone-100 text-stone-500 dark:bg-stone-900 dark:text-stone-400")}>
+                                                {ready ? "可用" : "即将开放"}
+                                            </Tag>
+                                        </div>
+                                        <h3 className="text-xl font-semibold">{tool.title}</h3>
+                                        <p className="mt-3 text-sm leading-7 text-stone-500 dark:text-stone-400">{tool.description}</p>
+                                    </div>
+                                    <Button type={ready ? "primary" : "default"} disabled={!ready} href={ready ? tool.href : undefined} icon={ready ? <ArrowRight className="size-4" /> : undefined} iconPlacement="end" className="mt-6 w-fit">
+                                        {tool.actionLabel}
+                                    </Button>
+                                </article>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <aside>
+                    <div className="mb-5">
+                        <p className="text-xs text-stone-500">mange-backend</p>
+                        <h2 className="mt-2 text-2xl font-semibold">网页端入口</h2>
+                    </div>
+                    <div className="grid gap-3">
+                        {backendLinks.map((link) => {
+                            const Icon = backendLinkIcons[link.key];
+                            return (
+                                <a
+                                    key={link.key}
+                                    href={link.href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="group flex items-center justify-between gap-4 rounded-lg border border-stone-200 px-4 py-3 text-sm transition hover:border-stone-950 dark:border-stone-800 dark:hover:border-stone-100"
+                                >
+                                    <span className="flex min-w-0 items-center gap-3">
+                                        <Icon className="size-4 shrink-0 text-stone-500 dark:text-stone-400" />
+                                        <span className="truncate font-medium">{link.label}</span>
+                                    </span>
+                                    <ExternalLink className="size-4 shrink-0 text-stone-400 transition group-hover:text-stone-950 dark:group-hover:text-stone-100" />
+                                </a>
+                            );
+                        })}
+                    </div>
+                </aside>
+            </section>
         </main>
     );
 }
