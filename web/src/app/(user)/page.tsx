@@ -1,9 +1,9 @@
 "use client";
 
 import { Button, Tag } from "antd";
-import { ArrowRight, CircleUserRound, Clapperboard, Coins, ExternalLink, KeyRound, Maximize2, Settings2, SlidersHorizontal, Sparkles, UserPlus, Users } from "lucide-react";
+import { ArrowRight, CircleUserRound, Clapperboard, Coins, ExternalLink, KeyRound, Maximize2, Settings2, SlidersHorizontal, Sparkles, UserPlus, Users, type LucideIcon } from "lucide-react";
 
-import { createMangeBackendWebLinks, toolHubTools } from "@/lib/tool-hub";
+import { createMangeBackendWebLinks, toolHubTools, type MangeBackendWebLink, type ToolHubTool } from "@/lib/tool-hub";
 import { cn } from "@/lib/utils";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -11,7 +11,7 @@ const backendLinks = createMangeBackendWebLinks();
 const toolIcons = {
     canvas: Maximize2,
     comic: Clapperboard,
-};
+} satisfies Record<ToolHubTool["key"], LucideIcon>;
 const backendLinkIcons = {
     register: UserPlus,
     account: CircleUserRound,
@@ -20,7 +20,7 @@ const backendLinkIcons = {
     keys: KeyRound,
     credits: Coins,
     settings: Settings2,
-};
+} satisfies Record<MangeBackendWebLink["key"], LucideIcon>;
 
 export default function IndexPage() {
     const user = useUserStore((state) => state.user);
