@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { App } from "antd";
 
-import { buildLoginRedirect, isDesktopLoginRoute, isProtectedDesktopRoute } from "@/lib/desktop-routes";
+import { resolveDesktopStartupRedirect } from "@/lib/desktop-routes";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -18,16 +18,16 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const loadUserModels = useConfigStore((state) => state.loadUserModels);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const isLoginPage = isDesktopLoginRoute(pathname);
-    const isProtectedPage = isProtectedDesktopRoute(pathname);
-
     useEffect(() => {
-        if (isLoginPage) return;
         void hydrateUser().then((user) => {
-            if (!user && isProtectedPage) router.replace(buildLoginRedirect(pathname, window.location.search));
+            const redirectTarget = resolveDesktopStartupRedirect(pathname, window.location.search, Boolean(user));
+            if (redirectTarget) {
+                router.replace(redirectTarget);
+                return;
+            }
             if (user) void loadUserModels(user.id);
         });
-    }, [hydrateUser, isLoginPage, isProtectedPage, loadUserModels, pathname, router]);
+    }, [hydrateUser, loadUserModels, pathname, router]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;

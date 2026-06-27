@@ -13,3 +13,15 @@ export function isProtectedDesktopRoute(pathname: string) {
 export function buildLoginRedirect(pathname: string, search = "") {
     return `/login?redirect=${encodeURIComponent(`${pathname}${search}`)}`;
 }
+
+export function resolveDesktopStartupRedirect(pathname: string, search: string, hasUser: boolean) {
+    if (hasUser) {
+        return isDesktopLoginRoute(pathname) ? "/" : null;
+    }
+
+    if (isProtectedDesktopRoute(pathname)) {
+        return buildLoginRedirect(pathname, search);
+    }
+
+    return null;
+}

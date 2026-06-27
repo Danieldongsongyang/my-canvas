@@ -67,6 +67,23 @@ describe("api proxy route", () => {
         });
     });
 
+    it("rejects legacy prompts and assets api endpoints", async () => {
+        const promptsResponse = await GET(createRequest(`${APP_URL}/api/prompts`), createContext(["prompts"]));
+        const assetsResponse = await GET(createRequest(`${APP_URL}/api/assets`), createContext(["assets"]));
+
+        expect(promptsResponse.status).toBe(404);
+        await expect(promptsResponse.json()).resolves.toMatchObject({
+            success: false,
+            message: UNSUPPORTED_API_MESSAGE,
+        });
+
+        expect(assetsResponse.status).toBe(404);
+        await expect(assetsResponse.json()).resolves.toMatchObject({
+            success: false,
+            message: UNSUPPORTED_API_MESSAGE,
+        });
+    });
+
     it("rejects legacy admin api endpoints", async () => {
         const response = await GET(createRequest(`${APP_URL}/api/admin/users`), createContext(["admin", "users"]));
 

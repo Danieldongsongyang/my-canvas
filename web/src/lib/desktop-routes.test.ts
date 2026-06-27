@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildLoginRedirect, isDesktopLoginRoute, isProtectedDesktopRoute } from "@/lib/desktop-routes";
+import { buildLoginRedirect, isDesktopLoginRoute, isProtectedDesktopRoute, resolveDesktopStartupRedirect } from "@/lib/desktop-routes";
 
 describe("desktop route guards", () => {
     it("treats the root tool hub as a login-only page", () => {
@@ -17,5 +17,11 @@ describe("desktop route guards", () => {
 
     it("builds a safe login redirect for protected pages with search params", () => {
         expect(buildLoginRedirect("/canvas", "?project=demo")).toBe("/login?redirect=%2Fcanvas%3Fproject%3Ddemo");
+    });
+
+    it("sends authenticated users away from the login page and unauthenticated users to login for protected pages", () => {
+        expect(resolveDesktopStartupRedirect("/login", "", true)).toBe("/");
+        expect(resolveDesktopStartupRedirect("/canvas", "?project=demo", false)).toBe("/login?redirect=%2Fcanvas%3Fproject%3Ddemo");
+        expect(resolveDesktopStartupRedirect("/admin", "", false)).toBeNull();
     });
 });
