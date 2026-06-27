@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import { AUTH_SESSION_KEY, ensureCanvasRelayToken, fetchCurrentUser, login, logout, type AuthPayload, type AuthUser } from "@/services/api/auth";
+import { AUTH_SESSION_KEY, ensureCanvasRelayToken, fetchCurrentUser, login, logout, toPersistedAuthUser, type AuthPayload, type AuthUser } from "@/services/api/auth";
 
 type UserStore = {
     relayReady: boolean;
@@ -32,6 +32,10 @@ async function requireRelayReady(userId: string | number) {
     throw new Error("登录成功，但初始化 AI Key 失败，请稍后重试或联系管理员");
 }
 
+function resetUserState() {
+    return { relayReady: false, user: null, isReady: true, isLoading: false } as const;
+}
+
 export const useUserStore = create<UserStore>()(
     persist(
         (set, get) => ({
@@ -41,27 +45,27 @@ export const useUserStore = create<UserStore>()(
             isLoading: false,
             clearSession: () => {
                 const userId = get().user?.id;
-                set({ relayReady: false, user: null, isReady: true, isLoading: false });
+                set(resetUserState());
                 void logout(userId);
             },
             hydrateUser: async () => {
                 const userId = get().user?.id;
                 if (!userId) {
-                    set({ user: null, relayReady: false, isReady: true, isLoading: false });
+                    set(resetUserState());
                     return null;
                 }
                 set({ isLoading: true });
                 try {
                     const user = await fetchCurrentUser(userId);
                     if (user.role === "guest") {
-                        set({ relayReady: false, user: null, isReady: true, isLoading: false });
+                        set(resetUserState());
                         return null;
                     }
                     const relayReady = get().relayReady || (await initRelay(user.id));
                     set({ user, relayReady, isReady: true, isLoading: false });
                     return user;
                 } catch {
-                    set({ relayReady: false, user: null, isReady: true, isLoading: false });
+                    set(resetUserState());
                     return null;
                 }
             },
@@ -74,14 +78,14 @@ export const useUserStore = create<UserStore>()(
                     set({ relayReady, user: session.user, isReady: true, isLoading: false });
                     return session.user;
                 } catch (error) {
-                    set({ relayReady: false, user: null, isReady: true, isLoading: false });
+                    set(resetUserState());
                     throw error;
                 }
             },
         }),
         {
             name: AUTH_SESSION_KEY,
-            partialize: (state) => ({ user: state.user, relayReady: state.relayReady }),
+            partialize: (state) => ({ user: toPersistedAuthUser(state.user), relayReady: state.relayReady }),
             onRehydrateStorage: () => (state) => {
                 if (state) {
                     state.isReady = false;

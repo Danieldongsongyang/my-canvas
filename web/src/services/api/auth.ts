@@ -1,4 +1,4 @@
-export const AUTH_SESSION_KEY = "infinite-canvas-auth-session-v3";
+export const AUTH_SESSION_KEY = "infinite-canvas-auth-session-v4";
 
 export type UserRole = "guest" | "user" | "admin";
 
@@ -14,6 +14,8 @@ export type AuthUser = {
     createdAt?: string;
     updatedAt?: string;
 };
+
+export type PersistedAuthUser = Pick<AuthUser, "id" | "username" | "displayName" | "avatarUrl" | "role">;
 
 export type AuthSession = {
     user: AuthUser;
@@ -90,6 +92,17 @@ export async function ensureCanvasRelayToken(userId?: string | number) {
 
 export function userAuthHeaders(userId?: string | number) {
     return userId ? { "New-Api-User": String(userId) } : {};
+}
+
+export function toPersistedAuthUser(user: AuthUser | null): PersistedAuthUser | null {
+    if (!user) return null;
+    return {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        role: user.role,
+    };
 }
 
 async function mangeRequest<T>(url: string, init: RequestInit, userId?: string | number) {
