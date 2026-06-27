@@ -4,7 +4,7 @@ import { Copy } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button, Card, Tag } from "antd";
 
-import { formatPromptDate, type Prompt } from "@/services/api/prompts";
+import { formatPromptDate, type Prompt } from "@/lib/prompt-library";
 
 export function PromptCard({
     item,
