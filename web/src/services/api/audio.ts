@@ -2,24 +2,18 @@ import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { userAuthHeaders } from "@/services/api/auth";
+import { ensureRemoteRelayUserId, refreshRemoteUserSession } from "@/services/api/canvas-relay";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
-import { useUserStore } from "@/stores/use-user-store";
 
 function aiApiUrl(config: AiConfig, path: string) {
     return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
 }
 
-function relayUserId() {
-    const { user, relayReady } = useUserStore.getState();
-    if (!user?.id || !relayReady) throw new Error("请先登录并初始化云端 Relay");
-    return user.id;
-}
-
-function aiHeaders(config: AiConfig) {
+async function aiHeaders(config: AiConfig) {
     return config.channelMode === "remote"
         ? {
-              ...userAuthHeaders(relayUserId()),
+              ...userAuthHeaders(await ensureRemoteRelayUserId()),
               "Content-Type": "application/json",
           }
         : {
@@ -29,7 +23,7 @@ function aiHeaders(config: AiConfig) {
 }
 
 function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
+    if (config.channelMode === "remote") refreshRemoteUserSession();
 }
 
 export async function requestAudioGeneration(config: AiConfig, prompt: string): Promise<Blob> {
@@ -49,7 +43,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string): 
                 speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
                 ...(instructions ? { instructions } : {}),
             },
-            { headers: aiHeaders(config), responseType: "blob", withCredentials: true },
+            { headers: await aiHeaders(config), responseType: "blob", withCredentials: true },
         );
         await assertAudioBlob(response.data);
         refreshRemoteUser(config);

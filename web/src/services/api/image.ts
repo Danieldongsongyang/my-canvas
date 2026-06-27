@@ -1,8 +1,8 @@
 import axios from "axios";
 
-import { ensureCanvasRelayToken, userAuthHeaders } from "@/services/api/auth";
+import { userAuthHeaders } from "@/services/api/auth";
+import { ensureRemoteRelayUserId, refreshRemoteUserSession } from "@/services/api/canvas-relay";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
-import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -189,21 +189,10 @@ function aiApiUrl(config: AiConfig, path: string) {
     return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
 }
 
-async function relayUserId() {
-    const { user, relayReady } = useUserStore.getState();
-    if (!user?.id) throw new Error("请先登录并初始化云端 Relay");
-    if (!relayReady) {
-        const relay = await ensureCanvasRelayToken(user.id);
-        if (!relay.relay_ready) throw new Error("Relay API Key 初始化失败");
-        useUserStore.setState({ relayReady: true });
-    }
-    return user.id;
-}
-
 async function aiHeaders(config: AiConfig, contentType?: string) {
     return config.channelMode === "remote"
         ? {
-              ...userAuthHeaders(await relayUserId()),
+              ...userAuthHeaders(await ensureRemoteRelayUserId()),
               ...(contentType ? { "Content-Type": contentType } : {}),
           }
         : {
@@ -213,7 +202,7 @@ async function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
+    if (config.channelMode === "remote") refreshRemoteUserSession();
 }
 
 function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) {

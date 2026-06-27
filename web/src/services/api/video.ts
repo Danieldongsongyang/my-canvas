@@ -2,11 +2,11 @@ import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { userAuthHeaders } from "@/services/api/auth";
+import { ensureRemoteRelayUserId, refreshRemoteUserSession } from "@/services/api/canvas-relay";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
-import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -28,16 +28,10 @@ function aiApiUrl(config: AiConfig, path: string) {
     return config.channelMode === "remote" ? `/api/canvas/relay${path}` : buildApiUrl(config.baseUrl, path);
 }
 
-function relayUserId() {
-    const { user, relayReady } = useUserStore.getState();
-    if (!user?.id || !relayReady) throw new Error("请先登录并初始化云端 Relay");
-    return user.id;
-}
-
-function aiHeaders(config: AiConfig, contentType?: string) {
+async function aiHeaders(config: AiConfig, contentType?: string) {
     return config.channelMode === "remote"
         ? {
-              ...userAuthHeaders(relayUserId()),
+              ...userAuthHeaders(await ensureRemoteRelayUserId()),
               ...(contentType ? { "Content-Type": contentType } : {}),
           }
         : {
@@ -47,7 +41,7 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
+    if (config.channelMode === "remote") refreshRemoteUserSession();
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = []): Promise<VideoGenerationResult> {
@@ -97,7 +91,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
     files.forEach((file) => body.append("input_reference[]", file));
     try {
-        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), withCredentials: true })).data);
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: await aiHeaders(config), withCredentials: true })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         return { id: created.id, provider: "openai", model };
     } catch (error) {
@@ -107,9 +101,10 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask): Promise<VideoGenerationTaskState> {
     try {
-        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data);
+        const headers = await aiHeaders(config);
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers, params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data);
         if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, responseType: "blob", withCredentials: true });
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers, params: config.channelMode === "remote" ? { model: task.model } : undefined, responseType: "blob", withCredentials: true });
             await assertVideoBlob(content.data);
             refreshRemoteUser(config);
             return { status: "completed", result: { blob: content.data } };
@@ -140,7 +135,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     };
 
     try {
-        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), withCredentials: true })).data);
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: await aiHeaders(config, "application/json"), withCredentials: true })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
@@ -150,7 +145,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data);
+        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: await aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, withCredentials: true })).data);
         if (state.status === "succeeded") {
             const url = state.content?.video_url;
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
@@ -240,7 +235,7 @@ async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
 
 async function uploadReferenceMedia(file: File) {
     void file;
-    relayUserId();
+    await ensureRemoteRelayUserId();
     throw new Error("远程 Seedance 参考素材需要使用公网 URL 或素材 ID，当前后端暂未提供本地文件转公网 URL 的上传接口");
 }
 
