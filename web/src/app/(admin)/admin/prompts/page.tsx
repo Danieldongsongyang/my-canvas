@@ -6,7 +6,7 @@ import { Button, Card, Col, Flex, Form, Image, Input, Modal, Row, Select, Space,
 import { useEffect, useState } from "react";
 
 import { useCopyText } from "@/hooks/use-copy-text";
-import type { Prompt } from "@/services/api/prompts";
+import type { Prompt } from "@/lib/prompt-library";
 import { useAdminPrompts } from "./use-admin-prompts";
 
 export default function AdminPromptsPage() {

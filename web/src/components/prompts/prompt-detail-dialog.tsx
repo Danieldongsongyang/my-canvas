@@ -3,7 +3,7 @@
 import { Copy, FolderPlus } from "lucide-react";
 import { Button, Modal, Space, Tag } from "antd";
 
-import { formatPromptDate, type Prompt } from "@/services/api/prompts";
+import { formatPromptDate, type Prompt } from "@/lib/prompt-library";
 
 export function PromptDetailDialog({ prompt, onClose, onCopy, onSaveAsset }: { prompt: Prompt | null; onClose: () => void; onCopy: (prompt: string) => void; onSaveAsset?: (prompt: Prompt) => void }) {
     return (

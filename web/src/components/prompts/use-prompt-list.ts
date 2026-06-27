@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
-import { ALL_PROMPTS_OPTION, fetchPrompts } from "@/services/api/prompts";
+import { ALL_PROMPTS_OPTION } from "@/lib/prompt-library";
+import { fetchPrompts } from "@/services/api/prompts";
 
 export const PROMPT_PAGE_SIZE = 20;
 

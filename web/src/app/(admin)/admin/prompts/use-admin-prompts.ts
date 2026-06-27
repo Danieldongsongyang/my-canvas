@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
 
+import type { Prompt } from "@/lib/prompt-library";
 import { deleteAdminPrompt, deleteAdminPrompts, fetchAdminPrompts, fetchAdminPromptCategories, saveAdminPrompt, syncAdminPromptCategory, type AdminPromptCategory } from "@/services/api/admin";
-import type { Prompt } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
 
 const defaultPageSize = 10;

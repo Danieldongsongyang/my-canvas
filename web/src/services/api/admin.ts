@@ -1,5 +1,6 @@
 import { apiDelete, apiGet, apiPost, compactApiParams } from "@/services/api/request";
-import type { Prompt, PromptListResponse } from "@/services/api/prompts";
+import type { Prompt } from "@/lib/prompt-library";
+import type { PromptListResponse } from "@/services/api/prompts";
 
 export type AdminPromptCategory = {
     category: string;

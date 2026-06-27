@@ -1,19 +1,4 @@
-import { apiGet, compactApiParams } from "@/services/api/request";
-
-export type Prompt = {
-    id: string;
-    title: string;
-    coverUrl: string;
-    prompt: string;
-    tags: string[];
-    category: string;
-    githubUrl: string;
-    preview: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export const ALL_PROMPTS_OPTION = "全部";
+import { ALL_PROMPTS_OPTION, type Prompt, promptLibraryItems } from "@/lib/prompt-library";
 
 export type PromptListResponse = {
     items: Prompt[];
@@ -23,19 +8,23 @@ export type PromptListResponse = {
 };
 
 export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page, pageSize }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
-    return apiGet<PromptListResponse>(
-        "/api/prompts",
-        compactApiParams({
-            ...(keyword ? { keyword } : {}),
-            ...(tag.length ? { tag } : {}),
-            ...(category !== ALL_PROMPTS_OPTION ? { category } : {}),
-            ...(page ? { page } : {}),
-            ...(pageSize ? { pageSize } : {}),
-        }),
-    );
-}
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    const selectedTags = tag.map((item) => item.trim()).filter(Boolean);
+    const filteredItems = promptLibraryItems.filter((item) => {
+        if (category !== ALL_PROMPTS_OPTION && item.category !== category) return false;
+        if (selectedTags.length > 0 && !selectedTags.every((selectedTag) => item.tags.includes(selectedTag))) return false;
+        if (!normalizedKeyword) return true;
+        const haystack = `${item.title}\n${item.prompt}\n${item.preview}\n${item.tags.join("\n")}`.toLowerCase();
+        return haystack.includes(normalizedKeyword);
+    });
+    const currentPage = Math.max(page || 1, 1);
+    const currentPageSize = Math.max(pageSize || filteredItems.length || 1, 1);
+    const start = (currentPage - 1) * currentPageSize;
 
-export function formatPromptDate(value: string) {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+    return {
+        items: filteredItems.slice(start, start + currentPageSize),
+        tags: Array.from(new Set(promptLibraryItems.flatMap((item) => item.tags))),
+        categories: Array.from(new Set(promptLibraryItems.map((item) => item.category))),
+        total: filteredItems.length,
+    };
 }
