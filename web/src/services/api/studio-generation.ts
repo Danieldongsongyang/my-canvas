@@ -40,6 +40,13 @@ type ParseAndApplyScriptResult = {
 
 type StudioChatRequester = (config: AiConfig, messages: StudioChatMessage[]) => Promise<string>;
 
+type ChatCompletionPayload = {
+    model: string;
+    messages: StudioChatMessage[];
+    temperature: number;
+    response_format?: { type: "json_object" };
+};
+
 const parsedItemSchema = z.object({
     name: z.string().trim().min(1),
     description: z.string().trim().default(""),
@@ -68,25 +75,24 @@ export class StudioGenerationError extends Error {
 
 export async function requestStudioChatCompletion(config: AiConfig, messages: StudioChatMessage[]) {
     try {
-        const response = await axios.post<{
-            choices?: Array<{ message?: { content?: string } }>;
-            error?: { message?: string };
-            msg?: string;
-        }>(
-            aiApiUrl(config, "/chat/completions"),
-            {
+        let response: StudioChatCompletionResponse;
+        try {
+            response = await sendChatCompletion(config, {
                 model: config.textModel || config.model,
                 messages,
                 temperature: 0.2,
                 response_format: { type: "json_object" },
-            },
-            {
-                headers: await aiRequestHeaders(config, "application/json"),
-                withCredentials: true,
-            },
-        );
-        const content = response.data.choices?.[0]?.message?.content;
-        if (!content) throw new StudioGenerationError(response.data.error?.message || response.data.msg || "剧本解析没有返回内容");
+            });
+        } catch (error) {
+            if (!isUnsupportedResponseFormatError(error)) throw error;
+            response = await sendChatCompletion(config, {
+                model: config.textModel || config.model,
+                messages,
+                temperature: 0.2,
+            });
+        }
+        const content = response.choices?.[0]?.message?.content;
+        if (!content) throw new StudioGenerationError(response.error?.message || response.msg || "剧本解析没有返回内容");
         refreshRemoteUser(config);
         return content;
     } catch (error) {
@@ -130,6 +136,8 @@ export function normalizeScriptStructure(payload: unknown): StudioScriptStructur
 
 export async function parseAndApplyScript(input: ParseAndApplyScriptInput): Promise<ParseAndApplyScriptResult> {
     const parseResult = await parseScript(input);
+    const currentSeries = await input.repository.getSeries(input.seriesId);
+    const currentEpisode = currentSeries?.episodes.find((episode) => episode.id === input.episodeId);
     const result = await input.repository.updateEpisode(input.seriesId, input.episodeId, {
         script: input.script,
         characters: parseResult.characters,
@@ -137,6 +145,7 @@ export async function parseAndApplyScript(input: ParseAndApplyScriptInput): Prom
         props: parseResult.props,
         shots: parseResult.shots,
         generation: {
+            ...currentEpisode?.generation,
             scriptParser: {
                 model: parseResult.model,
                 status: "completed",
@@ -145,6 +154,27 @@ export async function parseAndApplyScript(input: ParseAndApplyScriptInput): Prom
         },
     });
     return { ...result, parseResult };
+}
+
+type StudioChatCompletionResponse = {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+    msg?: string;
+};
+
+async function sendChatCompletion(config: AiConfig, payload: ChatCompletionPayload) {
+    const response = await axios.post<StudioChatCompletionResponse>(aiApiUrl(config, "/chat/completions"), payload, {
+        headers: await aiRequestHeaders(config, "application/json"),
+        withCredentials: true,
+    });
+    return response.data;
+}
+
+function isUnsupportedResponseFormatError(error: unknown) {
+    if (!axios.isAxiosError<{ error?: { message?: string }; msg?: string; message?: string } | string>(error)) return false;
+    const responseData = error.response?.data;
+    const message = typeof responseData === "string" ? responseData : responseData?.error?.message || responseData?.msg || responseData?.message || "";
+    return /response_format|json_object/i.test(message) && /unsupported|not supported|unknown|invalid/i.test(message);
 }
 
 function buildScriptParseMessages(script: string): StudioChatMessage[] {

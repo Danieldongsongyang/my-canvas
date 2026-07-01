@@ -103,6 +103,40 @@ describe("studio generation adapter", () => {
         });
     });
 
+    it("preserves existing generation metadata when script parsing completes", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            generation: {
+                manualStructure: {
+                    status: "completed",
+                    savedAt: "2026-07-01T07:40:00.000Z",
+                },
+            },
+        });
+
+        const updated = await parseAndApplyScript({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            script: "雨夜，山海便利店。",
+            config,
+            requestChat: vi.fn(async () => relayJson),
+        });
+
+        expect(updated.episode.generation).toMatchObject({
+            manualStructure: {
+                status: "completed",
+                savedAt: "2026-07-01T07:40:00.000Z",
+            },
+            scriptParser: {
+                model: "gpt-5.5",
+                status: "completed",
+            },
+        });
+    });
+
     it("keeps existing manual episode data when relay output is malformed", async () => {
         const repository = createStudioRepository(createInMemoryStudioStorage());
         const series = await repository.createSeries({ title: "山海便利店" });

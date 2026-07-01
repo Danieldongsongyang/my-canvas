@@ -215,6 +215,37 @@ describe("relay-backed canvas api requests", () => {
         expect(postHeaders(0)).not.toHaveProperty("Authorization");
     });
 
+    it("retries Studio script parsing without JSON mode when the relay rejects response_format", async () => {
+        const unsupportedJsonModeError = {
+            response: {
+                data: {
+                    error: {
+                        message: "Unsupported parameter: response_format",
+                    },
+                },
+            },
+        };
+        axiosMocks.isAxiosError.mockReturnValueOnce(true);
+        axiosMocks.post.mockRejectedValueOnce(unsupportedJsonModeError).mockResolvedValueOnce({ data: { choices: [{ message: { content: '{"shotDrafts":[{"title":"开场","description":"便利店亮灯"}]}' } }] } });
+
+        const result = await requestStudioChatCompletion(remoteConfig, [
+            { role: "system", content: "只返回 JSON" },
+            { role: "user", content: "解析剧本" },
+        ]);
+
+        expect(result).toContain("shotDrafts");
+        expect(axiosMocks.post).toHaveBeenCalledTimes(2);
+        expect(axiosMocks.post.mock.calls[0]?.[1]).toMatchObject({
+            model: "gpt-5.5",
+            response_format: { type: "json_object" },
+        });
+        expect(axiosMocks.post.mock.calls[1]?.[1]).toMatchObject({
+            model: "gpt-5.5",
+        });
+        expect(axiosMocks.post.mock.calls[1]?.[1]).not.toHaveProperty("response_format");
+        expect(postHeaders(1)).not.toHaveProperty("Authorization");
+    });
+
     it("re-initializes relay and uses relay create/query/content routes for remote video requests", async () => {
         axiosMocks.post.mockResolvedValue({ data: { id: "task-1", status: "queued" } });
         axiosMocks.get.mockResolvedValueOnce({ data: { id: "task-1", status: "completed" } });

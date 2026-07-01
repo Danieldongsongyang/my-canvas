@@ -76,7 +76,7 @@ export default function StudioWorkspacePage() {
             setStructureDraft(formatEpisodeStructure(result.episode));
             message.success("结构草稿已保存");
         } catch (error) {
-            const fallback = error instanceof StudioGenerationError ? error.message : "结构草稿不是有效 JSON，请检查后再保存。";
+            const fallback = error instanceof StudioGenerationError ? "结构草稿格式不正确，请检查 characters、scenes、props 和 shotDrafts。" : "结构草稿不是有效 JSON，请检查后再保存。";
             setParseError(fallback);
             message.error(fallback);
         } finally {

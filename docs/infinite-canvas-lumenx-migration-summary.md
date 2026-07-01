@@ -311,6 +311,18 @@ web/src/services/api/studio-generation.ts
 - 自审结果：未新增 Studio 后端接口；Studio 生成请求复用现有 `ai-request` 和用户态 relay；Studio 页面仍只通过仓储边界写本地项目数据，未直接依赖 localforage / IndexedDB；失败路径不覆盖用户手工内容。
 - 下一步：提交本次 Issue 4；之后进入 Issue 5「适配性移植 LumenX Studio 组件」，优先 ScriptProcessor 组件化迁移。
 
+#### 15:58 Review 修复进度
+
+- 当前目标：处理 Issue 4 自审发现的真实 relay 兼容性和 generation 元数据保护问题。
+- 已完成：`requestStudioChatCompletion()` 在模型或 relay 不支持 `response_format` / JSON mode 时，会自动重试一次不带 `response_format` 的 chat completions 请求。
+- 已完成：`parseAndApplyScript()` 写入 `generation.scriptParser` 时会保留 episode 已有 `generation` 字段，避免覆盖手动结构草稿或后续生成元数据。
+- 已完成：手动保存结构草稿的 schema 错误文案已从 AI 解析错误中拆出，避免用户手动编辑 JSON 时看到“AI 返回内容”。
+- 已新增回归测试：不支持 `response_format` 时的 Studio relay fallback；解析成功后保留已有 `generation.manualStructure`。
+- 已验证：`bun run test src/services/api/studio-generation.test.ts src/services/api/relay-requests.test.ts` 通过。
+- 已验证：`bun run typecheck` 通过。
+- 已验证：`bun run test` 全量测试通过。
+- 下一步：进入 Issue 5「适配性移植 LumenX Studio 组件」。
+
 媒体层口径：
 
 ```text
