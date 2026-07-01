@@ -284,6 +284,20 @@ web/src/services/api/studio-generation.ts
 - 自审结果：未发现 Studio 页面直接依赖 localforage / IndexedDB；未新增 mange-backend Studio 业务接口；未迁移 LumenX 复杂组件或真实生成链路。
 - 下一步：Issue 3 asset-first 引用边界，或 Issue 4 剧本解析真实 relay 闭环。
 
+#### 15:40 进度
+
+- 当前目标：执行 Issue 3「asset-first 引用边界」。
+- 已完成：新增 `web/src/services/asset-references.ts`，集中扫描 Studio 与 Canvas 对 asset 的引用，并提供删除前检查结果。
+- 已完成：Canvas 节点 metadata 支持 `assetRef` / `assetRefs`，用于保存 asset-first 引用关系。
+- 已完成：从素材库插入 Canvas 的文本、图片、视频 payload 会携带 `assetRef`，Canvas 节点会写入同一个 asset 引用模型。
+- 已完成：`useAssetStore.removeAsset()` 改为保护删除；删除前检查 Studio 和 Canvas 引用，被引用时不移除 asset。
+- 已完成：我的素材页删除被引用 asset 时，会展示 Studio / Canvas 引用位置，提示先解除引用。
+- 已验证：`bun run test src/services/asset-references.test.ts src/lib/local-asset-library.test.ts` 通过。
+- 已验证：`bun run typecheck` 通过。
+- 已验证：`bun run test` 全量测试通过。
+- 自审结果：未引入 Studio 自有媒体存储；未新增后端接口；未把 localforage / IndexedDB 泄漏进 Studio 或 Canvas 组件；删除保护集中在 asset 引用服务和资产 store 边界。
+- 下一步：进入 Issue 4「Studio 生成适配层最小闭环」，先跑剧本解析真实 relay 链路。
+
 媒体层口径：
 
 ```text

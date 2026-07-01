@@ -5,8 +5,10 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { checkAssetDeletion, type AssetDeletionCheck } from "@/services/asset-references";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import { studioRepository } from "@/services/studio-local";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -32,7 +34,7 @@ type AssetStore = {
     assets: Asset[];
     addAsset: (asset: Omit<Asset, "id" | "createdAt" | "updatedAt">) => string;
     updateAsset: (id: string, patch: Partial<Omit<Asset, "id" | "createdAt">>) => void;
-    removeAsset: (id: string) => void;
+    removeAsset: (id: string) => Promise<AssetDeletionCheck>;
     replaceAssets: (assets: Asset[]) => void;
     cleanupImages: (extra?: unknown) => void;
 };
@@ -80,12 +82,17 @@ export const useAssetStore = create<AssetStore>()(
                 set((state) => ({
                     assets: state.assets.map((asset) => (asset.id === id ? ({ ...asset, ...patch, updatedAt: new Date().toISOString() } as Asset) : asset)),
                 })),
-            removeAsset: (id) =>
+            removeAsset: async (id) => {
+                const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
+                const result = await checkAssetDeletion(id, { studioRepository, canvasProjects: useCanvasStore.getState().projects });
+                if (!result.canDelete) return result;
                 set((state) => {
                     const assets = state.assets.filter((asset) => asset.id !== id);
                     get().cleanupImages({ assets });
                     return { assets };
-                }),
+                });
+                return result;
+            },
             replaceAssets: (assets) => set({ assets }),
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {

@@ -1,4 +1,5 @@
 import { formatBytes } from "@/lib/image-utils";
+import type { AssetRef } from "@/services/asset-references";
 import type { Asset, AssetKind } from "@/stores/use-asset-store";
 
 type LocalAssetLibraryQuery = {
@@ -16,9 +17,9 @@ type LocalAssetLibraryResult = {
 };
 
 export type InsertAssetPayload =
-    | { kind: "text"; content: string; title: string }
-    | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
-    | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
+    | { kind: "text"; content: string; title: string; assetRef: AssetRef }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; assetRef: AssetRef }
+    | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number; assetRef: AssetRef };
 
 const libraryKinds: AssetKind[] = ["text", "image", "video"];
 
@@ -42,8 +43,9 @@ export function queryLocalAssetLibrary(assets: Asset[], query: LocalAssetLibrary
 }
 
 export function toInsertAssetPayload(asset: Asset): InsertAssetPayload {
+    const assetRef: AssetRef = { assetId: asset.id, kind: asset.kind, role: "reference" };
     if (asset.kind === "text") {
-        return { kind: "text", content: asset.data.content, title: asset.title };
+        return { kind: "text", content: asset.data.content, title: asset.title, assetRef };
     }
     if (asset.kind === "video") {
         return {
@@ -53,6 +55,7 @@ export function toInsertAssetPayload(asset: Asset): InsertAssetPayload {
             title: asset.title,
             width: asset.data.width,
             height: asset.data.height,
+            assetRef,
         };
     }
     return {
@@ -60,6 +63,7 @@ export function toInsertAssetPayload(asset: Asset): InsertAssetPayload {
         dataUrl: asset.data.dataUrl,
         storageKey: asset.data.storageKey,
         title: asset.title,
+        assetRef,
     };
 }
 

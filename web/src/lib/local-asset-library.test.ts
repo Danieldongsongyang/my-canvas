@@ -88,6 +88,7 @@ describe("local asset library", () => {
             kind: "text",
             content: "一句品牌文案",
             title: "品牌标题",
+            assetRef: { assetId: "text-1", kind: "text", role: "reference" },
         });
 
         expect(toInsertAssetPayload(assets[1])).toEqual({
@@ -95,6 +96,7 @@ describe("local asset library", () => {
             dataUrl: "https://example.com/image.png",
             storageKey: "image-key",
             title: "主视觉",
+            assetRef: { assetId: "image-1", kind: "image", role: "reference" },
         });
 
         expect(toInsertAssetPayload(assets[2])).toEqual({
@@ -104,6 +106,7 @@ describe("local asset library", () => {
             title: "产品演示",
             width: 1920,
             height: 1080,
+            assetRef: { assetId: "video-1", kind: "video", role: "reference" },
         });
     });
 

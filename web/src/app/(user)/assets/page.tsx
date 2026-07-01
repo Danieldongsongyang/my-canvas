@@ -32,7 +32,7 @@ const kindOptions = [
 ];
 
 export default function AssetsPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const copyText = useCopyText();
     const [form] = Form.useForm<AssetFormValues>();
     const coverInputRef = useRef<HTMLInputElement>(null);
@@ -180,9 +180,28 @@ export default function AssetsPage() {
         }
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (!deletingAsset) return;
-        removeAsset(deletingAsset.id);
+        const result = await removeAsset(deletingAsset.id);
+        if (!result.canDelete) {
+            modal.warning({
+                title: "素材仍在使用中",
+                content: (
+                    <div className="space-y-2">
+                        <Typography.Paragraph className="!mb-0">请先移除以下引用，再删除「{deletingAsset.title}」。</Typography.Paragraph>
+                        <ul className="m-0 list-disc space-y-1 pl-5">
+                            {result.references.map((reference) => (
+                                <li key={`${reference.source}:${reference.label}`} className="text-sm">
+                                    {reference.source === "studio" ? "Studio" : "Canvas"}：{reference.label}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ),
+            });
+            setDeletingAsset(null);
+            return;
+        }
         message.success("素材已删除");
         setDeletingAsset(null);
     };
@@ -250,11 +269,7 @@ export default function AssetsPage() {
                                 >
                                     导入素材
                                 </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={openCreate}
-                                >
+                                <button type="button" className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300" onClick={openCreate}>
                                     新增素材
                                 </button>
                             </div>
@@ -397,7 +412,7 @@ export default function AssetsPage() {
 
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
 
-            <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
+            <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={() => void confirmDelete()} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
             </Modal>
         </div>

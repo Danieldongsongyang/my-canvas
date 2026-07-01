@@ -43,13 +43,7 @@ import { useImageNodeHandlers } from "../hooks/use-image-node-handlers";
 import { useTextNodeHandlers } from "../hooks/use-text-node-handlers";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
-import {
-    CanvasNodeType,
-    type CanvasAssistantImage,
-    type CanvasAssistantSession,
-    type CanvasNodeData,
-    type Position,
-} from "../types";
+import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantSession, type CanvasNodeData, type Position } from "../types";
 import type { PendingConnectionCreate } from "./canvas-page-types";
 import {
     NODE_STATUS_SUCCESS,
@@ -914,9 +908,16 @@ function InfiniteCanvasPage() {
     );
 
     const handleAssetInsert = useCallback(
-        (payload: InsertAssetPayload) => {
+        async (payload: InsertAssetPayload) => {
             if (payload.kind === "text") {
-                insertAssistantText(payload.content);
+                const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                const node = {
+                    ...createCanvasNode(CanvasNodeType.Text, center, { content: payload.content, status: NODE_STATUS_SUCCESS, assetRef: payload.assetRef }),
+                    title: payload.title.slice(0, 32) || "Asset Text",
+                };
+                setNodes((prev) => [...prev, node]);
+                setSelectedNodeIds(new Set([node.id]));
+                setSelectedConnectionId(null);
             } else if (payload.kind === "video") {
                 const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -931,16 +932,33 @@ function InfiniteCanvasPage() {
                         position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 },
                         width: nextSize.width,
                         height: nextSize.height,
-                        metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height },
+                        metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height, assetRef: payload.assetRef },
                     },
                 ]);
                 setSelectedNodeIds(new Set([id]));
             } else {
-                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey });
+                const storedImage = payload.storageKey ? { url: payload.dataUrl, storageKey: payload.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(payload.dataUrl);
+                const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
+                const config = fitNodeSize(meta.width, meta.height);
+                const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const node: CanvasNodeData = {
+                    id,
+                    type: CanvasNodeType.Image,
+                    title: payload.title.slice(0, 32) || "Asset Image",
+                    position: { x: center.x - config.width / 2, y: center.y - config.height / 2 },
+                    width: config.width,
+                    height: config.height,
+                    metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: payload.title, assetRef: payload.assetRef },
+                };
+                setNodes((prev) => [...prev, node]);
+                setSelectedNodeIds(new Set([id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(id);
             }
             setAssetPickerOpen(false);
         },
-        [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
+        [screenToCanvas, size.height, size.width],
     );
 
     if (!projectLoaded) return <CanvasRefreshShell />;

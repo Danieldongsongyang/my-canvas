@@ -69,6 +69,20 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    assetRef?: {
+        assetId: string;
+        kind: "text" | "image" | "video" | "audio";
+        role?: "candidate" | "selected" | "reference";
+        note?: string;
+        metadata?: Record<string, unknown>;
+    };
+    assetRefs?: Array<{
+        assetId: string;
+        kind: "text" | "image" | "video" | "audio";
+        role?: "candidate" | "selected" | "reference";
+        note?: string;
+        metadata?: Record<string, unknown>;
+    }>;
 };
 
 export type CanvasNodeData = {
