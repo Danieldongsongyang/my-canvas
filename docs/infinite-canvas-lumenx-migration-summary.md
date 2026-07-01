@@ -3,7 +3,7 @@
 ## 1. 背景
 
 - LumenX：/Users/a1/Desktop/无限画布项目汇总/lumenx
-自己的项目 `infinite-canvas` 已经具备无限画布、AI 生图、图生图、视频生成、提示词库、素材管理等能力，因此它更适合作为主前端壳，而不是被其他项目替代。
+  自己的项目 `infinite-canvas` 已经具备无限画布、AI 生图、图生图、视频生成、提示词库、素材管理等能力，因此它更适合作为主前端壳，而不是被其他项目替代。
 
 ---
 
@@ -43,8 +43,6 @@ infinite-canvas 作为主应用
 > 保留自己的无限画布作为自由创作入口，把 LumenX Studio 改造成项目制短漫剧生产入口；不要迁移 Playground，否则会和自己的核心能力打架。
 
 ---
-
-
 
 ## 4. 为什么 LumenX Studio 最适合？
 
@@ -109,22 +107,22 @@ LumenX 当前 Studio 同时存在旧 i2v legacy 流程和新版 unified/R2V 流�
 
 建议按当前迁移优先级迁移：
 
-| 优先级 | 模块 | 价值 |
-|---|---|---|
-| P0 | Studio 项目壳 | 项目列表、项目详情、步骤导航和本地数据仓储边界，是承载迁移组件的入口 |
-| P0 | ScriptProcessor | 剧本输入和实体提取，是短漫剧流程入口 |
-| P0 | ArtDirection | 统一画风和视觉风格，影响后续角色、分镜和视频生成 |
-| P0 | Cast | 新版统一流程中的角色、场景、道具管理入口，优先于旧 ConsistencyVault |
-| P0 | StoryboardR2V | 新版统一流程的分镜和镜头生成工作台，是 Studio 核心 |
-| P0 | 基础 relay 生成适配 | 让 Studio 能通过当前登录态、模型列表和用户态 AI relay 发起生成 |
-| P1 | VideoAssembly | 视频组装、混音和导出预览，形成短漫剧闭环 |
-| P1 | 任务队列面板 | 多镜头生成、状态追踪、失败重试和结果回填 |
-| P1 | Studio 与本地素材库互通 | 将角色、场景、道具和镜头结果记录为 asset，并建立 Studio 候选引用 |
-| P1 | Studio 与 Canvas 互通 | 通过 asset 引用支持发送到 Canvas 自由编辑，并从 Canvas 回填 Studio 关系 |
-| P2 | 旧 ConsistencyVault | 作为一致性资产库的局部参考，不作为第一阶段主流程 |
-| P2 | 旧 StoryboardComposer / StoryboardFrameEditor | 作为旧分镜编辑交互参考，不作为第一阶段主流程 |
-| P2 | 旧 VideoGenerator / VideoQueue | 作为旧视频生成和队列交互参考，不作为第一阶段主流程 |
-| P2 | 配音、时间线和最终导出 | 视产品范围决定，可在主流程稳定后补齐 |
+| 优先级 | 模块                                          | 价值                                                                    |
+| ------ | --------------------------------------------- | ----------------------------------------------------------------------- |
+| P0     | Studio 项目壳                                 | 项目列表、项目详情、步骤导航和本地数据仓储边界，是承载迁移组件的入口    |
+| P0     | ScriptProcessor                               | 剧本输入和实体提取，是短漫剧流程入口                                    |
+| P0     | ArtDirection                                  | 统一画风和视觉风格，影响后续角色、分镜和视频生成                        |
+| P0     | Cast                                          | 新版统一流程中的角色、场景、道具管理入口，优先于旧 ConsistencyVault     |
+| P0     | StoryboardR2V                                 | 新版统一流程的分镜和镜头生成工作台，是 Studio 核心                      |
+| P0     | 基础 relay 生成适配                           | 让 Studio 能通过当前登录态、模型列表和用户态 AI relay 发起生成          |
+| P1     | VideoAssembly                                 | 视频组装、混音和导出预览，形成短漫剧闭环                                |
+| P1     | 任务队列面板                                  | 多镜头生成、状态追踪、失败重试和结果回填                                |
+| P1     | Studio 与本地素材库互通                       | 将角色、场景、道具和镜头结果记录为 asset，并建立 Studio 候选引用        |
+| P1     | Studio 与 Canvas 互通                         | 通过 asset 引用支持发送到 Canvas 自由编辑，并从 Canvas 回填 Studio 关系 |
+| P2     | 旧 ConsistencyVault                           | 作为一致性资产库的局部参考，不作为第一阶段主流程                        |
+| P2     | 旧 StoryboardComposer / StoryboardFrameEditor | 作为旧分镜编辑交互参考，不作为第一阶段主流程                            |
+| P2     | 旧 VideoGenerator / VideoQueue                | 作为旧视频生成和队列交互参考，不作为第一阶段主流程                      |
+| P2     | 配音、时间线和最终导出                        | 视产品范围决定，可在主流程稳定后补齐                                    |
 
 ---
 
@@ -297,6 +295,21 @@ web/src/services/api/studio-generation.ts
 - 已验证：`bun run test` 全量测试通过。
 - 自审结果：未引入 Studio 自有媒体存储；未新增后端接口；未把 localforage / IndexedDB 泄漏进 Studio 或 Canvas 组件；删除保护集中在 asset 引用服务和资产 store 边界。
 - 下一步：进入 Issue 4「Studio 生成适配层最小闭环」，先跑剧本解析真实 relay 链路。
+
+#### 15:50 进度
+
+- 当前目标：执行 Issue 4「Studio 生成适配层最小闭环」。
+- 已完成：新增 `web/src/services/api/studio-generation.ts`，提供 `parseScript()`、`parseAndApplyScript()` 和 `requestStudioChatCompletion()`。
+- 已完成：Studio 剧本解析 prompt、JSON 代码块清洗、结构化 JSON 提取、zod 校验、字段映射已移植到 TypeScript 适配层。
+- 已完成：第一条真实链路走当前 `textModel` 的 chat completions；远程模式复用 `/api/canvas/relay/chat/completions`、当前登录用户 relay header 和现有 `ai-request` 边界。
+- 已完成：解析结果会写入 `StudioEpisode` 的 `characters`、`scenes`、`props`、`shots` 和 `generation.scriptParser`，并保留剧本内容。
+- 已完成：`/studio/[seriesId]` Episode 01 工作台新增“解析剧本”按钮、解析失败提示、角色/场景/道具/分镜草稿摘要展示，以及可手动保存的结构草稿 JSON。
+- 已完成：坏 JSON 或结构不符合 schema 时抛出可恢复错误，不写回 episode，保留用户已有手工内容；手工结构草稿复用同一套 Studio schema 校验与字段映射。
+- 已验证：`bun run test src/services/api/studio-generation.test.ts src/services/api/relay-requests.test.ts` 通过。
+- 已验证：`bun run typecheck` 通过。
+- 已验证：`bun run test` 全量测试通过。
+- 自审结果：未新增 Studio 后端接口；Studio 生成请求复用现有 `ai-request` 和用户态 relay；Studio 页面仍只通过仓储边界写本地项目数据，未直接依赖 localforage / IndexedDB；失败路径不覆盖用户手工内容。
+- 下一步：提交本次 Issue 4；之后进入 Issue 5「适配性移植 LumenX Studio 组件」，优先 ScriptProcessor 组件化迁移。
 
 媒体层口径：
 

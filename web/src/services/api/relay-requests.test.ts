@@ -58,6 +58,7 @@ vi.mock("@/lib/image-utils", () => ({
 
 import { requestAudioGeneration } from "@/services/api/audio";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestStudioChatCompletion } from "@/services/api/studio-generation";
 import { createVideoGenerationTask, pollVideoGenerationTask } from "@/services/api/video";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -182,6 +183,32 @@ describe("relay-backed canvas api requests", () => {
             expect.objectContaining({
                 headers: expect.objectContaining({ "New-Api-User": "42", "Content-Type": "application/json" }),
                 responseType: "blob",
+                withCredentials: true,
+            }),
+        );
+        expect(postHeaders(0)).not.toHaveProperty("Authorization");
+    });
+
+    it("uses the current user relay route for Studio script parsing chat requests", async () => {
+        axiosMocks.post.mockResolvedValue({ data: { choices: [{ message: { content: '{"shotDrafts":[{"title":"开场","description":"便利店亮灯"}]}' } }] } });
+
+        const result = await requestStudioChatCompletion(remoteConfig, [
+            { role: "system", content: "只返回 JSON" },
+            { role: "user", content: "解析剧本" },
+        ]);
+
+        expect(result).toContain("shotDrafts");
+        expect(authMocks.ensureCanvasRelayToken).toHaveBeenCalledWith("42");
+        expect(userStoreMock.setState).toHaveBeenCalledWith({ relayReady: true });
+        expect(axiosMocks.post).toHaveBeenCalledWith(
+            "/api/canvas/relay/chat/completions",
+            expect.objectContaining({
+                model: "gpt-5.5",
+                messages: expect.arrayContaining([expect.objectContaining({ content: "解析剧本" })]),
+                response_format: { type: "json_object" },
+            }),
+            expect.objectContaining({
+                headers: expect.objectContaining({ "New-Api-User": "42", "Content-Type": "application/json" }),
                 withCredentials: true,
             }),
         );
