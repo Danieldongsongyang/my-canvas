@@ -383,15 +383,4 @@ CODEX_HOME=/home/agent/workspace/.sandcastle/codex-home
 THIRD_PARTY_API_KEY=你的第三方APIKey
 GH_TOKEN=你原来的GitHubToken
 这里的 /home/agent/workspace 是 Sandcastle Docker 沙箱里的 repo 路径，刚才我也从包里确认了常量就是这个路径。不要写宿主机路径 /Users/a1/...，容器里面看不到那个路径。
-还要改 main.ts 里的模型名
-你现在的 `.sandcastle/main.ts` 里写死了：
-agent: sandcastle.codex("gpt-5.4")
-Sandcastle 最终会生成：
-codex exec ... -m gpt-5.4
-这个 -m gpt-5.4 会覆盖 config.toml 里的 model。所以你必须把 main.ts 里所有 sandcastle.codex("gpt-5.4") 换成第三方模型 ID，或者更好一点，改成环境变量：
-const CODEX_MODEL = process.env.SANDCASTLE_CODEX_MODEL || "你的第三方模型ID";
-然后把几处都改成：
-agent: sandcastle.codex(CODEX_MODEL)
-你的 `.sandcastle/.env` 再加：
-SANDCASTLE_CODEX_MODEL=你的第三方模型ID
-这样以后换模型不用再改代码。
+
