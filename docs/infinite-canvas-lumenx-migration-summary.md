@@ -323,6 +323,21 @@ web/src/services/api/studio-generation.ts
 - 已验证：`bun run test` 全量测试通过。
 - 下一步：进入 Issue 5「适配性移植 LumenX Studio 组件」。
 
+#### 17:01 Issue 5 进度
+
+- 当前目标：执行 Issue 5「适配性移植 LumenX Studio 组件」，先把工作台空间结构对齐 LumenX，再迁移 ScriptProcessor。
+- 已对照源码：`/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/project/ProjectClient.tsx`、`PipelineSidebar.tsx`、`ScriptProcessor.tsx`、`StepPageHeader.tsx`、`SidePanelHeader.tsx`。
+- 已完成：`/studio/[seriesId]` 从普通后台详情页重排为 LumenX unified/R2V 风格的全屏 pipeline shell：左侧 5 步 rail，主区域按 step 切换，Script 步骤采用左侧剧本编辑 + 右侧结构草稿栏。
+- 已完成：新增 `studio-workspace-model.tsx`，集中生成 `Script / Art Direction / Cast / Storyboard / Assembly` 五步和状态，页面不再硬编码临时 nav。
+- 已完成：当前 Issue 4 的剧本保存、AI 解析、结构 JSON 手动保存能力已搬入新的 ScriptProcessor 布局。
+- 已完成：Art Direction、Cast、Storyboard、Assembly 暂以 LumenX pipeline 占位方式保留入口，后续按 Issue 5 顺序逐个接入真实组件。
+- 已新增回归测试：`studio-workspace-model.test.ts` 覆盖 LumenX unified/R2V 步骤顺序、状态推导和结构草稿格式化。
+- 已验证：`bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts' src/services/api/studio-generation.test.ts src/services/api/relay-requests.test.ts` 通过。
+- 已验证：`bun run typecheck` 通过。
+- 已验证：`bun run test` 全量测试通过。
+- 已知限制：headless 浏览器访问 `/studio` 会被登录页拦截，无法在无登录态下截图工作台；需在已登录桌面窗口中目测确认最终视觉。
+- 下一步：提交 Issue 5 第一段；然后继续迁移 ArtDirection 或先做一次真实视觉对照微调。
+
 媒体层口径：
 
 ```text
