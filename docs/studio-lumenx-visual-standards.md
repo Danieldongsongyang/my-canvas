@@ -1,0 +1,38 @@
+## Studio 工作区视觉规范
+
+- Studio 工作区指 `/studio/:seriesId` 下的项目制短漫剧生产台。以后开发 Studio 工作区时，视觉风格必须以 LumenX 工作台为基准，不要重新设计一套新的 Studio 皮肤。
+- Studio 工作区必须保持沉浸式工作台体验：具体项目页 `/studio/:seriesId` 不显示全局顶部导航；`/studio` 项目库可以保留全局导航。
+- Studio 工作区优先复用当前已落地的 LumenX 风格：
+  - dark glass 工作台背景
+  - 左侧 PipelineRail 流程栏
+  - `STEP 0N · NAME` 页面头部层级
+  - 信息 pill 胶囊
+  - rounded-full frosted 主/次行动按钮
+  - inset/elevated/surface 面板层级
+  - 低亮度边框、低饱和文字、青绿色 primary、暖橙 accent
+- Studio 工作区颜色基线优先使用当前已校准的 LumenX atelier token：
+  - base `#0c0b0e`
+  - surface `#131116`
+  - elevated `#181620`
+  - inset `#0a090c`
+  - primary `#34d8c4`
+  - primary hover `#5ee9d6`
+  - accent `#ffa94d`
+  - foreground `#f2ede4`
+  - secondary text `#a8a2b0`
+  - muted text `#8b8597`
+  - glass border `rgba(255,255,255,0.06)`
+- 编写或修改 Studio 工作区 UI 前，必须先查看当前实现：
+  - `web/src/app/(user)/studio/[seriesId]/page.tsx`
+  - `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.tsx`
+- 如果需要继续参考 LumenX 源码，优先查看：
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/shared/StepPageHeader.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/shared/WorkflowActionButton.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ScriptProcessor.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ArtDirection.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/Cast.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/StoryboardR2V.tsx`
+- 不要把 Studio 工作区改回普通 SaaS/dashboard 风格；不要使用营销页式 hero、浅色卡片堆叠、过度圆角、通用渐变背景、过亮大面积色块或当前项目默认黑白中性主题。
+- 不要为了“看起来更现代”自创新的 Studio 视觉语言。除非用户明确要求改版，否则所有 Studio 新步骤、新面板、新按钮、新卡片都必须延续已有 LumenX dark glass 工作台风格。
+- 如果用户要求开发 Studio 新功能，而视觉走向可能影响 LumenX 一致性，先说明会沿用 LumenX 工作台标准，再实施。
+- 每次完成 Studio 工作区 UI 修改后，必须至少做一次浏览器视觉核验；如果登录态或运行环境阻止截图，需要在最终回复中明确说明未完成视觉核验。
