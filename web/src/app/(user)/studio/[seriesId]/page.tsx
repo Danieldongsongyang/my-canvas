@@ -855,14 +855,14 @@ function ComingStep({ step, episode }: { step?: StudioPipelineStep; episode: Stu
                 stepNumber={step ? Number(step.label.slice(0, 1)) : 1}
                 englishName={step?.label.split(". ")[1]?.toUpperCase() ?? "STUDIO"}
                 title={step?.label.split(". ")[1] ?? "Studio"}
-                subtitle="Issue 5 先固定 LumenX pipeline 空间结构，后续切片会逐步接入该步骤的真实组件。"
+                subtitle="Issue 5 已完成 Script、Art Direction、Cast 和 StoryboardR2V 轻量版；Assembly 属于后续视频组装闭环。"
                 pills={<StepPill label="镜头" value={episode.shots.length} />}
             />
             <div className="flex flex-1 items-center justify-center bg-[#131116] p-8">
                 <div className="w-full max-w-xl rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-6 text-center">
-                    <p className="text-sm text-[#a8a2b0]">该步骤已占位在 LumenX 统一 R2V 工作台中。</p>
+                    <p className="text-sm text-[#a8a2b0]">Assembly 已保留在 LumenX 统一 R2V 工作台中。</p>
                     <h2 className="mt-3 text-2xl font-semibold text-[#f2ede4]">{step?.label}</h2>
-                    <p className="mt-3 text-sm leading-7 text-[#8b8597]">下一轮会按 Issue 5 顺序继续迁移 Art Direction、Cast 和 StoryboardR2V 轻量版。</p>
+                    <p className="mt-3 text-sm leading-7 text-[#8b8597]">当前 Issue 5 范围已经收口；这个步骤会在后续“视频组装、混音和导出预览”切片里接入真实能力。</p>
                 </div>
             </div>
         </section>

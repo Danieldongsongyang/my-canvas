@@ -687,3 +687,12 @@ Review 后修正：
 - `git diff --check`
 - touched-file prettier check
 - 已通过内置浏览器进入本地 `http://127.0.0.1:3002/studio/:seriesId` 并截图核验：顶部全局导航已隐藏，工作区进入沉浸式 LumenX dark glass 布局。
+
+### 2026-07-01 18:25 Issue 5 占位文案修正
+
+修正 Studio 工作区 `Assembly` 占位页旧文案。旧文案写着“下一轮会按 Issue 5 顺序继续迁移 Art Direction、Cast 和 StoryboardR2V 轻量版”，容易误导为 Issue 5 尚未完成。
+
+实际状态：
+
+- Issue 5 已完成 ScriptProcessor、ArtDirection、Cast、StoryboardR2V 轻量版。
+- `Assembly` 仍是占位，原因不是 Issue 5 未完成，而是视频组装、混音和导出预览属于后续闭环切片。
