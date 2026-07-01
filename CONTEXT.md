@@ -61,8 +61,28 @@ _Avoid_: OAuth 登录、Passkey 登录、完整网页登录流程
 _Avoid_: relay API Key、登录 token
 
 **本地素材库**:
-桌面端保存和使用的用户素材集合，第一阶段由当前前端本地持久化承载，不归 mange-backend 所有。
-_Avoid_: 后端素材库、云素材库
+桌面端保存和使用的 asset 集合，包含用户成功生成、导入或上传的图片、视频、音频和文本素材，由当前前端资产仓储边界承载，不归 mange-backend 所有。
+_Avoid_: 后端素材库、云素材库、仅精选素材、临时缓存
+
+**Studio 候选媒体**:
+本地素材库中的 asset 在 Studio 项目、镜头、角色、场景或道具中的候选引用关系；即使未被选中，只要候选关系仍在项目记录中就应保留。
+_Avoid_: 未入库结果、独立媒体文件、Canvas 节点媒体、临时缓存
+
+**Canvas 节点媒体**:
+本地素材库中的 asset 在画布节点中的引用关系，画布项目负责节点位置、尺寸、连线和画布上下文。
+_Avoid_: 独立素材库、Studio 候选媒体、画布资产系统
+
+**素材沉淀**:
+用户对本地素材库中的 asset 进行收藏、打标签、归档到项目资产、标记精选或整理复用的动作，不是生成结果进入素材库的前置条件。
+_Avoid_: 生成入库、直接互通、隐式同步
+
+**资产引用**:
+Studio 项目、Canvas 项目或素材库视图对同一个 asset 的使用关系，通常保存 asset id、storageKey 和使用上下文，而不是复制媒体文件。
+_Avoid_: 媒体文件副本、跨模块直接拷贝
+
+**资产删除保护**:
+删除本地素材库 asset 前检查 Studio 和 Canvas 是否仍有资产引用的保护规则，第一阶段默认阻止硬删仍被引用的 asset。
+_Avoid_: 级联清空引用、默认强制删除、静默删除
 
 **本地提示词库**:
 桌面端内置或本地保存的提示词集合，第一阶段由当前前端静态数据或本地持久化承载，不归 mange-backend 所有。
@@ -71,6 +91,54 @@ _Avoid_: 后端提示词库、云提示词库
 **AI 漫剧生成流程**:
 桌面端后续计划新增的工具流程，和画布并列作为工具入口页上的一个功能入口。
 _Avoid_: 画布子功能、后端管理功能
+
+**Studio 短漫剧模块**:
+桌面端围绕剧本、分镜、角色、场景、道具和镜头生产组织的项目制创作入口，和画布并列存在。
+_Avoid_: Playground、画布子页面、后端管理功能
+
+**Studio 系列**:
+Studio 短漫剧模块中的作品级容器，用于承载跨集共享的画风、角色、场景、道具和生成偏好。
+_Avoid_: 单集项目、Canvas 项目、素材库文件夹
+
+**Studio 剧集**:
+Studio 系列下的一集内容，用于承载本集剧本、分镜、镜头候选、镜头视频和流程状态。
+_Avoid_: 系列、独立素材、画布节点
+
+**Studio 统一 R2V 流程**:
+Studio 短漫剧模块第一阶段采用的主工作流，由剧本、画风、演员表、R2V 分镜工作台和视频组装构成。
+_Avoid_: 旧 i2v legacy 流程、完整 Playground 迁移
+
+**Studio 最小生成闭环**:
+Studio 短漫剧模块第一阶段必须跑通的真实 relay 链路，从剧本解析到镜头候选生成并回填到本地项目数据。
+_Avoid_: 纯静态壳、完整视频生产系统
+
+**Studio 生成适配层**:
+当前前端中承载 Studio 剧本解析、提示词组装、结构化结果校验和生成调用的 TypeScript 服务层，底层使用现有用户态 AI relay。
+_Avoid_: LumenX Python 后端、mange-backend Studio 业务接口
+
+**Studio 模型候选来源**:
+Studio 短漫剧模块第一阶段可选择的模型列表，来自当前用户在 mange-backend 下可用的模型列表和当前项目配置体系。
+_Avoid_: LumenX model catalog、Studio 自有渠道列表
+
+**Studio 本地模型偏好**:
+Studio 项目本地保存的 text、image、video 模型默认选择和少量生成参数，用于保持长项目内的生成一致性。
+_Avoid_: 模型渠道、候选模型列表、mange-backend 配置
+
+**Studio 本地项目数据**:
+Studio 短漫剧模块第一阶段保存在桌面端本地数据仓储边界内的项目、剧本、分镜、角色、场景、道具和镜头状态。
+_Avoid_: mange-backend 业务数据、云端 Studio 数据
+
+**Studio 本地数据仓储边界**:
+Studio 短漫剧模块读写本地项目数据的服务边界，组件和业务模型不得直接依赖 localforage、IndexedDB、本地文件、SQLite 或项目 manifest 等具体存储引擎。
+_Avoid_: 组件内 localforage、直接 IndexedDB、存储引擎泄漏
+
+**asset 媒体存储边界**:
+本地素材库保存 asset 媒体文件的服务边界，当前 Web 阶段可复用 `image-storage` 和 `file-storage` 存入 IndexedDB，未来 Electron 阶段可迁移到本地文件系统。
+_Avoid_: Studio 自有媒体存储、Canvas 自有媒体存储、业务模型直接落盘
+
+**Studio 云端业务后端**:
+未来为 Studio 短漫剧模块提供云同步、跨设备、团队协作或成片资产托管的业务服务端能力，不属于第一阶段 mange-backend relay 边界。
+_Avoid_: mange-backend、同源请求适配层、第一阶段本地数据
 
 **WebDAV 同步**:
 桌面端可选的外部文件同步能力，不属于账号、额度或 AI relay 主链路，也不属于 mange-backend 同源请求适配层。

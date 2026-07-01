@@ -2,13 +2,7 @@
 
 ## 1. 背景
 
-当前计划是：将以下三个开源项目中的前端能力，迁移或参考集成到自己的前端项目中：
-
-- ArcReel：`https://github.com/ArcReel/ArcReel`
-- LumenX：`https://github.com/alibaba/lumenx/blob/main/README_EN.md`
-- Jellyfish：`https://github.com/Forget-C/Jellyfish`
-- 自己的项目：`https://github.com/Danieldongsongyang/infinite-canvas`
-
+- LumenX：/Users/a1/Desktop/无限画布项目汇总/lumenx
 自己的项目 `infinite-canvas` 已经具备无限画布、AI 生图、图生图、视频生成、提示词库、素材管理等能力，因此它更适合作为主前端壳，而不是被其他项目替代。
 
 ---
@@ -29,7 +23,7 @@ infinite-canvas 作为主应用
 │   ├── 图生图
 │   ├── 视频生成
 │   ├── 节点编排
-│   └── 素材沉淀
+│   └── 资产保存与复用
 │
 └── Studio 短漫剧模块
     ├── 剧本解析
@@ -50,17 +44,7 @@ infinite-canvas 作为主应用
 
 ---
 
-## 3. 三个项目的迁移价值对比
 
-| 项目 | 迁移价值 | 和当前项目前端适配性 | 建议 |
-|---|---:|---:|---|
-| LumenX Studio | 很高 | 高 | 重点迁移 |
-| LumenX Playground | 低 | 中高 | 不建议迁移完整模块，只参考小组件 |
-| ArcReel | 中高 | 中 | 参考任务队列、供应商、成本统计、导出流程 |
-| Jellyfish | 中高 | 中偏低 | 参考数据模型、角色一致性、分镜流程 |
-| 直接三者整合 | 低 | 低 | 不建议 |
-
----
 
 ## 4. 为什么 LumenX Studio 最适合？
 
@@ -75,7 +59,7 @@ LumenX Studio 的核心流程是：
 自己的无限画布更偏向：
 
 ```text
-自由创作 → 节点编排 → 图片/视频生成 → 素材沉淀
+自由创作 → 节点编排 → 图片/视频生成 → 资产保存与复用
 ```
 
 LumenX Studio 更偏向：
@@ -119,49 +103,28 @@ LumenX Playground 的定位是一个独立的图像/视频生成工作台，通�
 
 ---
 
-## 6. Playground 中仍然可以参考的部分
-
-虽然不建议迁移完整 Playground，但其中一些小组件和设计思路仍然有参考价值：
-
-| Playground 能力 | 是否迁移 | 处理方式 |
-|---|---:|---|
-| 模型选择器 | 可参考 | 融入自己的模型选择组件 |
-| 动态参数面板 | 可参考 | 融入自己的图片/视频参数面板 |
-| 任务队列 UI | 可参考 | 统一接入自己的任务系统 |
-| 结果画廊 | 可参考 | 融入自己的素材库或画布结果区 |
-| Prompt 历史 | 可参考 | 融入自己的提示词库 |
-| 素材选择弹窗 | 可参考 | 融入自己的资产系统 |
-| Playground 页面整体 | 不建议 | 不独立迁移 |
-
-也就是说：
-
-```text
-不迁移 Playground 页面
-只吸收 Playground 中局部组件的交互思路
-```
-
----
-
 ## 7. LumenX Studio 中最值得迁移的模块
 
-建议按优先级迁移：
+LumenX 当前 Studio 同时存在旧 i2v legacy 流程和新版 unified/R2V 流程。第一阶段优先迁移新版 unified/R2V 流程，旧流程组件只作为局部复用或兼容参考。
+
+建议按当前迁移优先级迁移：
 
 | 优先级 | 模块 | 价值 |
 |---|---|---|
-| P0 | ScriptProcessor | 剧本解析，是短漫剧流程入口 |
-| P0 | StoryboardComposer | 分镜生成，是 Studio 核心 |
-| P0 | StoryboardFrameEditor | 单个分镜编辑，是镜头生产基础 |
-| P0 | CharacterWorkbench | 角色管理，解决角色一致性 |
-| P0 | ConsistencyVault | 一致性资产库，是短漫剧核心能力 |
-| P1 | ArtDirection | 统一画风和视觉风格 |
-| P1 | AssetGrid | 资产管理，可接自己的素材库 |
-| P1 | VideoGenerator | 镜头视频生成 |
-| P1 | VideoQueue | 视频任务队列 |
-| P2 | VoiceActingStudio | 配音/TTS，视产品范围决定 |
-| P2 | Timeline | 时间线，适合后期合成 |
-| P2 | FinalMixStudio | 最终混音/合成 |
-| P2 | ExportStudio | 导出成片 |
-| P3 | PlaygroundPage | 不建议迁移 |
+| P0 | Studio 项目壳 | 项目列表、项目详情、步骤导航和本地数据仓储边界，是承载迁移组件的入口 |
+| P0 | ScriptProcessor | 剧本输入和实体提取，是短漫剧流程入口 |
+| P0 | ArtDirection | 统一画风和视觉风格，影响后续角色、分镜和视频生成 |
+| P0 | Cast | 新版统一流程中的角色、场景、道具管理入口，优先于旧 ConsistencyVault |
+| P0 | StoryboardR2V | 新版统一流程的分镜和镜头生成工作台，是 Studio 核心 |
+| P0 | 基础 relay 生成适配 | 让 Studio 能通过当前登录态、模型列表和用户态 AI relay 发起生成 |
+| P1 | VideoAssembly | 视频组装、混音和导出预览，形成短漫剧闭环 |
+| P1 | 任务队列面板 | 多镜头生成、状态追踪、失败重试和结果回填 |
+| P1 | Studio 与本地素材库互通 | 将角色、场景、道具和镜头结果记录为 asset，并建立 Studio 候选引用 |
+| P1 | Studio 与 Canvas 互通 | 通过 asset 引用支持发送到 Canvas 自由编辑，并从 Canvas 回填 Studio 关系 |
+| P2 | 旧 ConsistencyVault | 作为一致性资产库的局部参考，不作为第一阶段主流程 |
+| P2 | 旧 StoryboardComposer / StoryboardFrameEditor | 作为旧分镜编辑交互参考，不作为第一阶段主流程 |
+| P2 | 旧 VideoGenerator / VideoQueue | 作为旧视频生成和队列交互参考，不作为第一阶段主流程 |
+| P2 | 配音、时间线和最终导出 | 视产品范围决定，可在主流程稳定后补齐 |
 
 ---
 
@@ -178,7 +141,7 @@ LumenX Playground 的定位是一个独立的图像/视频生成工作台，通�
 │   └── 短漫剧 Studio，结构化生产入口
 │
 ├── /assets
-│   └── 统一素材库
+│   └── 统一资产库
 │
 └── /settings
     └── 模型、供应商、账号、存储配置
@@ -188,8 +151,20 @@ LumenX Playground 的定位是一个独立的图像/视频生成工作台，通�
 
 - `/canvas` 负责自由创作；
 - `/studio` 负责短漫剧项目流程；
-- `/assets` 负责统一素材沉淀；
+- `/assets` 负责统一资产保存、检索、整理和复用；
 - `/settings` 负责模型和系统配置。
+
+Studio 的底层数据模型第一阶段就预留“系列 / 剧集”边界：
+
+```text
+StudioSeries
+  作品级信息：标题、简介、共享画风、共享角色、共享场景、共享道具、模型偏好
+
+StudioEpisode
+  单集信息：剧本、分镜、镜头候选、镜头视频、当前流程状态
+```
+
+第一阶段 UI 先保持最小可用形态：用户看到的是“创建一个短漫剧项目”，系统默认生成一个系列和 Episode 01。完整剧集管理、跨集资产复用面板和 LumenX 复杂系列页迁移放到 MVP 后继续完善。
 
 ---
 
@@ -197,25 +172,48 @@ LumenX Playground 的定位是一个独立的图像/视频生成工作台，通�
 
 Canvas 和 Studio 不应该互相替代，而应该互相协作。
 
-推荐的交互方式：
+第一阶段先明确媒体边界：
 
 ```text
-Studio 中的角色 / 场景 / 分镜
-        ↓
-发送到 Canvas 继续自由编辑
-        ↓
-Canvas 生成或修改结果
-        ↓
-回填到 Studio 的分镜或资产库
+本地素材库 / asset
+  保存所有成功生成、导入或上传的媒体资产
+
+Studio 候选媒体
+  是 asset 在 Studio 项目、镜头、角色、场景或道具中的候选引用
+
+Canvas 节点媒体
+  是 asset 在画布节点中的引用
 ```
 
-这样可以形成清晰的产品闭环：
+也就是说，Studio 或 Canvas 成功生成出的图片、视频应进入本地素材库成为 asset；选中、不选中、收藏、归档、打标签只是 asset 的不同使用关系或整理状态。Studio 和 Canvas 不直接共享对方的过程数据，而是都通过 asset 引用同一份媒体资产。
+
+Studio 候选媒体不是临时缓存。即使某张候选图没有被选为当前镜头结果，只要它仍然记录在 Studio 项目、镜头、角色、场景或道具中，就必须保留候选引用，方便用户后续回看、比较和重新选择。删除候选引用只解除 Studio 关系，不等于删除本地素材库中的 asset。
+
+在这个模型下，原先“Studio 候选媒体不在素材库，可能被本地媒体清理误删”的问题不再成立。实现重点变成：生成链路必须先创建 asset，再写入 Studio 或 Canvas 的引用关系；删除 asset 时必须检查 Studio 和 Canvas 引用，避免破坏仍在使用的候选或节点。
+
+asset 删除策略采用保护优先：
+
+```text
+删除 asset
+        ↓
+检查 Studio 引用和 Canvas 引用
+        ↓
+如果存在引用，阻止删除并展示引用位置
+        ↓
+用户先解除引用
+        ↓
+无引用后才允许删除 asset
+```
+
+第一阶段不做级联清空引用，也不提供默认强制删除；危险强删需要影响预览和恢复策略，放到后续再设计。
+
+第一阶段推荐的产品闭环是：
 
 ```text
 Studio 负责流程管理
 Canvas 负责自由创作
-Assets 负责素材沉淀
-Backend 负责任务、生成、存储和导出
+Assets / 素材库负责跨模块资产保存、检索和复用
+Backend 负责账号、额度、模型渠道和 AI relay
 ```
 
 ---
@@ -243,23 +241,52 @@ Backend 负责任务、生成、存储和导出
 - 原项目模型供应商绑定
 ```
 
-LumenX Studio 前端需要改造成调用自己的后端 API。
+LumenX Studio 前端第一阶段不改造成调用新的项目业务后端 API，而是改造成使用当前项目的本地数据仓储边界和现有 relay 边界。
 
-建议在自己的前端中建立统一 API 适配层：
+建议在自己的前端中建立清晰的 Studio 适配层：
 
 ```text
-src/services/studio/
-├── project.service.ts
-├── script.service.ts
-├── storyboard.service.ts
-├── character.service.ts
-├── asset.service.ts
-├── video-task.service.ts
-├── voice.service.ts
-└── export.service.ts
+web/src/services/studio-local.ts
+  └── Studio 本地数据仓储边界。
+      第一阶段 Web 实现可复用 localforage / IndexedDB；
+      未来 Electron 桌面端可在该边界下切换到本地文件、SQLite 或项目 manifest。
+      Studio 组件不得直接依赖具体存储引擎。
+
+web/src/services/api/studio-generation.ts
+  └── Studio 需要的剧本解析、提示词组装、结构化结果校验和生成调用适配，底层走现有 request / relay 边界
 ```
 
-这样可以避免把 LumenX 原始 API 结构硬塞进自己的项目。
+这样可以避免把 LumenX 原始 API 结构硬塞进自己的项目，也避免第一阶段把 mange-backend 扩张成 Studio 业务后端。
+
+媒体层口径：
+
+```text
+Studio 不新增自己的媒体存储体系
+        ↓
+生成 / 导入 / 上传成功后先创建 asset
+        ↓
+当前 Web 阶段 asset 媒体由 image-storage / file-storage 存入 IndexedDB
+        ↓
+未来 Electron 阶段 asset 媒体由同一存储边界迁移到本地文件系统
+```
+
+第一阶段仍然用当前项目的 localforage / IndexedDB 快速跑通 MVP，但代码结构必须按 Electron 文件落盘来设计，不把 localforage 泄漏到组件和业务模型里。
+
+LumenX 的 Python `ScriptProcessor`、prompt 模板、JSON schema、结果清洗和字段映射只作为迁移参考，不作为第一阶段运行时依赖。第一阶段应把这些生成逻辑移植成当前前端的 TypeScript 适配层，并复用现有 `ai-request`、`image`、`video` 等服务。
+
+模型配置口径：
+
+```text
+模型列表和默认选择以当前项目配置为准
+        ↓
+候选模型来自当前用户在 mange-backend 下可用的模型列表
+        ↓
+Studio 项目可本地保存 text / image / video 模型偏好
+        ↓
+LumenX model catalog 只参考参数面板、模型分组和特殊参数支持
+```
+
+也就是说，LumenX model catalog 不作为 Studio 第一阶段的模型来源，不迁移原项目供应商绑定或独立模型目录。
 
 ---
 
@@ -269,41 +296,88 @@ src/services/studio/
 
 建议分阶段迁移：
 
-### 第一阶段：搭建 Studio 壳
+### 11.0 迁移口径：适配性移植
+
+Studio 迁移不应理解为从零重写 UI，也不应理解为原样复制 LumenX 的整个前端应用。
+
+更准确的口径是：
+
+```text
+以 LumenX Studio 组件为基础
+        ↓
+保留业务布局、关键交互、状态组织和视觉肌理
+        ↓
+替换或适配 API、路由、持久化、主题 token、组件库版本和局部样式
+        ↓
+接入当前项目的 Next.js / React / Ant Design / Tailwind / Zustand 体系
+```
+
+也就是说，迁移重点是 **基于 LumenX 组件的适配性移植**，不是从空白页面重新设计一套 Studio。
+
+视觉节奏上采用：
+
+```text
+第一阶段：可用、像 LumenX、少改动
+第二阶段：流程稳定后，再逐步统一到当前项目视觉体系
+```
+
+第一阶段只处理必要的外层入口、登录态、主题变量、组件库版本和冲突样式，不在迁移过程中顺手重设计 Studio。
+
+### 第一阶段：搭建 Studio 壳和统一 R2V 主流程
 
 目标：
 
-- 新增 `/studio` 路由；
+- 复用工具入口页中已经预留的“AI 漫剧生成”入口，将其从 `soon` 状态改为可进入 Studio；
+- 新增或接通 `/studio` 路由；
 - 新增项目列表；
 - 新增短漫剧项目详情页；
-- 建立 Studio 状态管理；
-- 接入自己的后端项目 API。
+- 建立 Studio 状态管理和本地数据仓储边界；
+- 底层数据模型预留 `StudioSeries` 和 `StudioEpisode`，第一阶段 UI 只暴露单项目单集；
+- 适配迁移 LumenX 的 `ScriptProcessor`、`ArtDirection`、`Cast` 和 `StoryboardR2V`；
+- 接入当前登录态、可用模型和用户态 AI relay；
+- 跑通 Studio 最小生成闭环：剧本解析、实体草稿、用户确认、R2V 分镜或镜头 prompt、至少一次图像或视频候选生成、结果回填本地项目数据；
+- AI 结果必须可手动编辑，AI 失败不能阻塞 Studio 继续使用；
+- 暂不新增 Studio 业务后端。
 
-### 第二阶段：迁移剧本和分镜
+第一阶段不要求完成完整视频任务队列、批量重试、视频组装和导出。这些事项记录在 [Studio MVP 后待办](./studio-post-mvp-todos.md)，等最小生成闭环跑通后继续完善。
+
+第一阶段也不要求完整迁移 LumenX 的 `SeriesDetailPage`、`EpisodeMiniList`、跨集 Reconcile 和复杂系列管理。数据模型先预留，复杂交互放到 MVP 后。
+
+第一批实现按 [Studio MVP 第一批实现切片](./studio-mvp-implementation-slices.md) 推进：
+
+```text
+Issue 1：接入口和空 Studio 壳
+Issue 2：Studio 类型和仓储边界
+Issue 3：asset-first 引用边界
+Issue 4：Studio 生成适配层最小闭环（先跑剧本解析真实 relay 链路）
+Issue 5：适配性移植 LumenX Studio 组件
+```
+
+### 第二阶段：跑通剧本、演员表和 R2V 分镜
 
 目标：
 
 - 剧本输入；
 - 剧本解析；
-- 自动生成分镜；
+- 角色、场景、道具提取和确认；
+- 画风设定；
 - 分镜列表；
-- 单个分镜编辑。
+- 单个镜头的图像候选、参考图和视频候选。
 
 这是 Studio 的核心 MVP。
 
-### 第三阶段：迁移角色、场景、道具资产
+### 第三阶段：打通素材库和 Canvas
 
 目标：
 
-- 角色管理；
-- 场景管理；
-- 道具管理；
-- 风格设定；
-- 一致性资产库。
+- Studio 角色、场景、道具和镜头结果生成后进入本地素材库；
+- Studio 项目保存这些 asset 的候选、选中和项目关系；
+- Canvas 节点引用本地素材库中的 asset；
+- Studio 和 Canvas 通过 asset 复用媒体，而不是直接复制对方过程数据。
 
-这一阶段决定短漫剧生成质量。
+这一阶段决定 Canvas 和 Studio 是否形成产品闭环。
 
-### 第四阶段：迁移视频生成和任务队列
+### 第四阶段：完善视频生成和任务队列
 
 目标：
 
@@ -311,9 +385,10 @@ src/services/studio/
 - 多镜头批量生成；
 - 任务状态追踪；
 - 失败重试；
-- 结果回填分镜。
+- 结果回填分镜；
+- 任务队列面板。
 
-### 第五阶段：迁移配音、时间线和导出
+### 第五阶段：迁移组装、配音、时间线和导出
 
 目标：
 
@@ -438,8 +513,8 @@ studio service
 ```text
 Canvas = 自由创作
 Studio = 项目制短漫剧生产
-Assets = 统一素材沉淀
-Backend = 生成任务和数据持久化
+Assets = 统一资产保存、检索、整理和复用
+Backend = 账号、额度、模型渠道和 AI relay
 ```
 
 这是最清晰、最适合长期演进的产品架构。
