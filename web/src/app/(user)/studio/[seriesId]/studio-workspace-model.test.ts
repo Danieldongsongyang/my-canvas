@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCastSections, buildStoryboardCards, buildStudioPipelineSteps, formatEpisodeStructure, normalizeArtDirectionDraft, STUDIO_STYLE_PRESETS } from "./studio-workspace-model";
+import {
+    buildCastSections,
+    buildStoryboardCards,
+    buildStudioModelPreferencesPatch,
+    buildStudioModelSummary,
+    buildStudioPipelineSteps,
+    FOLLOW_GLOBAL_MODEL_VALUE,
+    formatEpisodeStructure,
+    normalizeArtDirectionDraft,
+    STUDIO_STYLE_PRESETS,
+} from "./studio-workspace-model";
+import type { AiConfig } from "@/stores/use-config-store";
 import type { StudioEpisode } from "@/services/studio-local";
 
 function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
@@ -20,6 +31,37 @@ function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
 }
 
 describe("studio workspace model", () => {
+    it("builds Studio model preference patches and clears follow-global selections", () => {
+        expect(
+            buildStudioModelPreferencesPatch({
+                textModel: "gpt-5.5",
+                imageModel: FOLLOW_GLOBAL_MODEL_VALUE,
+                videoModel: "sora-1",
+            }),
+        ).toEqual({
+            modelPreferences: {
+                textModel: "gpt-5.5",
+                imageModel: undefined,
+                videoModel: "sora-1",
+            },
+        });
+    });
+
+    it("summarizes Studio model preferences with global fallbacks", () => {
+        const config = {
+            model: "gpt-5",
+            textModel: "gpt-5.5",
+            imageModel: "seedream-4",
+            videoModel: "sora-1",
+        } as AiConfig;
+
+        expect(buildStudioModelSummary({ textModel: "claude-sonnet-5", imageModel: "", videoModel: "kling-v3" }, config)).toEqual([
+            { key: "textModel", label: "文本", value: "claude-sonnet-5", source: "project" },
+            { key: "imageModel", label: "图像", value: "seedream-4", source: "global" },
+            { key: "videoModel", label: "视频", value: "kling-v3", source: "project" },
+        ]);
+    });
+
     it("uses the LumenX unified R2V step order for the Studio rail", () => {
         expect(buildStudioPipelineSteps(episode()).map((step) => step.id)).toEqual(["script", "art_direction", "cast", "storyboard_r2v", "assembly"]);
         expect(buildStudioPipelineSteps(episode()).map((step) => step.label)).toEqual(["1. Script", "2. Art Direction", "3. Cast", "4. Storyboard", "5. Assembly"]);

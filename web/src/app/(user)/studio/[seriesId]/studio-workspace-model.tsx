@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { BookOpen, Clapperboard, Film, Palette, Users } from "lucide-react";
 
-import type { StudioEpisode } from "@/services/studio-local";
+import type { StudioEpisode, StudioSeries } from "@/services/studio-local";
+import type { AiConfig } from "@/stores/use-config-store";
 
 export type StudioPipelineStep = {
     id: "script" | "art_direction" | "cast" | "storyboard_r2v" | "assembly";
@@ -55,6 +56,23 @@ export type StudioStoryboardCard = {
     candidateCount: number;
 };
 
+export type StudioModelPreferenceKey = keyof StudioSeries["modelPreferences"];
+
+export type StudioModelSummaryItem = {
+    key: StudioModelPreferenceKey;
+    label: string;
+    value: string;
+    source: "project" | "global" | "missing";
+};
+
+export const FOLLOW_GLOBAL_MODEL_VALUE = "__studio_follow_global__";
+
+const STUDIO_MODEL_LABELS: Record<StudioModelPreferenceKey, string> = {
+    textModel: "文本",
+    imageModel: "图像",
+    videoModel: "视频",
+};
+
 export const STUDIO_STYLE_PRESETS: StudioStylePreset[] = [
     {
         id: "cinematic-neon-noir",
@@ -93,6 +111,24 @@ export const STUDIO_STYLE_PRESETS: StudioStylePreset[] = [
         swatches: ["#f2eee7", "#101113", "#e24d42"],
     },
 ];
+
+export function buildStudioModelPreferencesPatch(input: Record<StudioModelPreferenceKey, string>) {
+    return {
+        modelPreferences: {
+            textModel: cleanModelPreference(input.textModel),
+            imageModel: cleanModelPreference(input.imageModel),
+            videoModel: cleanModelPreference(input.videoModel),
+        },
+    };
+}
+
+export function buildStudioModelSummary(preferences: StudioSeries["modelPreferences"], config: AiConfig): StudioModelSummaryItem[] {
+    return [
+        buildStudioModelSummaryItem("textModel", preferences.textModel, config.textModel || config.model),
+        buildStudioModelSummaryItem("imageModel", preferences.imageModel, config.imageModel),
+        buildStudioModelSummaryItem("videoModel", preferences.videoModel, config.videoModel),
+    ];
+}
 
 export function buildStudioPipelineSteps(episode: StudioEpisode): StudioPipelineStep[] {
     const hasParsedScript = Boolean(episode.generation?.scriptParser);
@@ -218,6 +254,18 @@ export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCa
                 candidateCount: shot.assetRefs.filter((ref) => ref.role === "candidate" || ref.role === "selected").length,
             };
         });
+}
+
+function cleanModelPreference(value: string) {
+    const normalized = value.trim();
+    return normalized && normalized !== FOLLOW_GLOBAL_MODEL_VALUE ? normalized : undefined;
+}
+
+function buildStudioModelSummaryItem(key: StudioModelPreferenceKey, preference: string | undefined, globalModel: string): StudioModelSummaryItem {
+    const projectModel = preference?.trim();
+    if (projectModel) return { key, label: STUDIO_MODEL_LABELS[key], value: projectModel, source: "project" };
+    const fallback = globalModel.trim();
+    return { key, label: STUDIO_MODEL_LABELS[key], value: fallback || "未配置", source: fallback ? "global" : "missing" };
 }
 
 function buildCastItem(item: { id: string; name: string; description: string; assetRefs: unknown[] }, kind: StudioCastItem["kind"], episode: StudioEpisode): StudioCastItem {

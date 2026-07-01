@@ -2,14 +2,29 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Alert, App, Button, ConfigProvider, Input, List, Tag, theme as antdTheme } from "antd";
-import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Plus, Save, Sparkles, Users, WandSparkles } from "lucide-react";
+import { Alert, App, Button, ConfigProvider, Input, List, Modal, Select, Tag, theme as antdTheme } from "antd";
+import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Plus, Save, Settings2, Sparkles, Users, WandSparkles } from "lucide-react";
 
 import { normalizeScriptStructure, parseAndApplyScript, StudioGenerationError } from "@/services/api/studio-generation";
 import { studioRepository, type StudioEpisode, type StudioSeries } from "@/services/studio-local";
 import { useConfigStore } from "@/stores/use-config-store";
+import type { AiConfig } from "@/stores/use-config-store";
 import { cn } from "@/lib/utils";
-import { buildCastSections, buildStoryboardCards, buildStudioPipelineSteps, formatEpisodeStructure, normalizeArtDirectionDraft, readArtDirectionDraft, STUDIO_STYLE_PRESETS, type StudioPipelineStep, type StudioStylePreset } from "./studio-workspace-model";
+import {
+    buildCastSections,
+    buildStoryboardCards,
+    buildStudioModelPreferencesPatch,
+    buildStudioModelSummary,
+    buildStudioPipelineSteps,
+    FOLLOW_GLOBAL_MODEL_VALUE,
+    formatEpisodeStructure,
+    normalizeArtDirectionDraft,
+    readArtDirectionDraft,
+    STUDIO_STYLE_PRESETS,
+    type StudioModelPreferenceKey,
+    type StudioPipelineStep,
+    type StudioStylePreset,
+} from "./studio-workspace-model";
 
 export default function StudioWorkspacePage() {
     const { message } = App.useApp();
@@ -29,12 +44,20 @@ export default function StudioWorkspacePage() {
     const [positivePrompt, setPositivePrompt] = useState(STUDIO_STYLE_PRESETS[0].positivePrompt);
     const [negativePrompt, setNegativePrompt] = useState(STUDIO_STYLE_PRESETS[0].negativePrompt);
     const [savingArtDirection, setSavingArtDirection] = useState(false);
+    const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+    const [savingModelSettings, setSavingModelSettings] = useState(false);
+    const [modelDraft, setModelDraft] = useState<Record<StudioModelPreferenceKey, string>>({
+        textModel: FOLLOW_GLOBAL_MODEL_VALUE,
+        imageModel: FOLLOW_GLOBAL_MODEL_VALUE,
+        videoModel: FOLLOW_GLOBAL_MODEL_VALUE,
+    });
     const config = useConfigStore((state) => state.config);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
 
     const episode = useMemo<StudioEpisode | null>(() => series?.episodes[0] ?? null, [series]);
     const textModel = series?.modelPreferences.textModel || config.textModel || config.model;
+    const modelSummary = useMemo(() => buildStudioModelSummary(series?.modelPreferences ?? {}, config), [series?.modelPreferences, config]);
     const steps = useMemo(() => (episode ? buildStudioPipelineSteps(episode) : []), [episode]);
 
     const syncArtDirectionDraft = (nextEpisode: StudioEpisode | null) => {
@@ -147,6 +170,29 @@ export default function StudioWorkspacePage() {
         setNegativePrompt(preset.negativePrompt);
     };
 
+    const openModelSettings = () => {
+        if (!series) return;
+        setModelDraft({
+            textModel: series.modelPreferences.textModel || FOLLOW_GLOBAL_MODEL_VALUE,
+            imageModel: series.modelPreferences.imageModel || FOLLOW_GLOBAL_MODEL_VALUE,
+            videoModel: series.modelPreferences.videoModel || FOLLOW_GLOBAL_MODEL_VALUE,
+        });
+        setModelSettingsOpen(true);
+    };
+
+    const saveModelSettings = async () => {
+        if (!series) return;
+        setSavingModelSettings(true);
+        try {
+            const updated = await studioRepository.updateSeries(series.id, buildStudioModelPreferencesPatch(modelDraft));
+            setSeries(updated);
+            setModelSettingsOpen(false);
+            message.success("生成设置已保存");
+        } finally {
+            setSavingModelSettings(false);
+        }
+    };
+
     const saveArtDirection = async () => {
         if (!series || !episode) return;
         setSavingArtDirection(true);
@@ -192,7 +238,7 @@ export default function StudioWorkspacePage() {
             <main className="relative flex h-full w-full overflow-hidden bg-[#0c0b0e] text-[#f2ede4]">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_18%_0%,rgba(52,216,196,0.10),transparent_70%),radial-gradient(55%_45%_at_88%_100%,rgba(255,169,77,0.08),transparent_70%)]" />
                 <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background-image:radial-gradient(rgba(255,255,255,0.42)_0.6px,transparent_0.6px)] [background-size:3px_3px]" />
-                <PipelineRail series={series} episode={episode} steps={steps} activeStep={activeStep} onBack={() => router.push("/studio")} onStepChange={setActiveStep} />
+                <PipelineRail series={series} episode={episode} steps={steps} modelSummary={modelSummary} activeStep={activeStep} onBack={() => router.push("/studio")} onStepChange={setActiveStep} onOpenModelSettings={openModelSettings} />
                 <section className="relative z-10 flex min-w-0 flex-1 overflow-hidden">
                     {activeStep === "script" ? (
                         <ScriptProcessorStep
@@ -231,6 +277,19 @@ export default function StudioWorkspacePage() {
                         <ComingStep step={steps.find((step) => step.id === activeStep)} episode={episode} />
                     )}
                 </section>
+                <StudioModelSettingsModal
+                    open={modelSettingsOpen}
+                    saving={savingModelSettings}
+                    draft={modelDraft}
+                    config={config}
+                    onDraftChange={setModelDraft}
+                    onOpenGlobalConfig={() => {
+                        setModelSettingsOpen(false);
+                        openConfigDialog(true);
+                    }}
+                    onCancel={() => setModelSettingsOpen(false)}
+                    onSave={saveModelSettings}
+                />
             </main>
         </ConfigProvider>
     );
@@ -283,16 +342,20 @@ function PipelineRail({
     series,
     episode,
     steps,
+    modelSummary,
     activeStep,
     onBack,
     onStepChange,
+    onOpenModelSettings,
 }: {
     series: StudioSeries;
     episode: StudioEpisode;
     steps: StudioPipelineStep[];
+    modelSummary: ReturnType<typeof buildStudioModelSummary>;
     activeStep: StudioPipelineStep["id"];
     onBack: () => void;
     onStepChange: (stepId: StudioPipelineStep["id"]) => void;
+    onOpenModelSettings: () => void;
 }) {
     return (
         <aside className="relative z-20 flex h-full w-[272px] shrink-0 flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#0a090c]/95 backdrop-blur-xl">
@@ -329,13 +392,134 @@ function PipelineRail({
                 ))}
             </nav>
             <div className="border-t border-[rgba(255,255,255,0.06)] p-4">
-                <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-3">
-                    <p className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-[#8b8597]">当前模型</p>
-                    <p className="mt-1 truncate text-sm text-[#f2ede4]">{series.modelPreferences.textModel || "跟随全局配置"}</p>
-                </div>
+                <button
+                    className="group w-full rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-[#34d8c4]/35 hover:bg-[#34d8c4]/10"
+                    onClick={onOpenModelSettings}
+                >
+                    <span className="flex items-center justify-between gap-3">
+                        <span>
+                            <span className="block font-mono text-[0.625rem] uppercase tracking-[0.16em] text-[#8b8597]">生成设置</span>
+                            <span className="mt-1 block text-sm font-medium text-[#f2ede4]">项目模型偏好</span>
+                        </span>
+                        <span className="grid size-8 place-items-center rounded-full border border-[rgba(255,255,255,0.06)] bg-[#181620] text-[#8b8597] transition group-hover:border-[#34d8c4]/45 group-hover:text-[#34d8c4]">
+                            <Settings2 className="size-4" />
+                        </span>
+                    </span>
+                    <span className="mt-3 grid gap-1.5">
+                        {modelSummary.map((item) => (
+                            <span key={item.key} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-2 text-[0.75rem]">
+                                <span className="text-[#8b8597]">{item.label}</span>
+                                <span className={cn("truncate", item.source === "missing" ? "text-[#ffa94d]" : "text-[#f2ede4]")}>{item.value}</span>
+                                <span className={cn("font-mono text-[0.5625rem] uppercase tracking-[0.12em]", item.source === "project" ? "text-[#34d8c4]" : "text-[#8b8597]")}>
+                                    {item.source === "project" ? "Studio" : item.source === "global" ? "Global" : "None"}
+                                </span>
+                            </span>
+                        ))}
+                    </span>
+                </button>
             </div>
         </aside>
     );
+}
+
+function StudioModelSettingsModal({
+    open,
+    saving,
+    draft,
+    config,
+    onDraftChange,
+    onOpenGlobalConfig,
+    onCancel,
+    onSave,
+}: {
+    open: boolean;
+    saving: boolean;
+    draft: Record<StudioModelPreferenceKey, string>;
+    config: AiConfig;
+    onDraftChange: (draft: Record<StudioModelPreferenceKey, string>) => void;
+    onOpenGlobalConfig: () => void;
+    onCancel: () => void;
+    onSave: () => void;
+}) {
+    const modelFields: Array<{
+        key: StudioModelPreferenceKey;
+        title: string;
+        eyebrow: string;
+        globalModel: string;
+        options: string[];
+    }> = [
+        { key: "textModel", title: "文本模型", eyebrow: "SCRIPT / POLISH", globalModel: config.textModel || config.model, options: config.textModels },
+        { key: "imageModel", title: "生图模型", eyebrow: "IMAGE", globalModel: config.imageModel, options: config.imageModels },
+        { key: "videoModel", title: "视频模型", eyebrow: "VIDEO / R2V", globalModel: config.videoModel, options: config.videoModels },
+    ];
+
+    const updateDraft = (key: StudioModelPreferenceKey, value: string) => {
+        onDraftChange({ ...draft, [key]: value });
+    };
+
+    return (
+        <Modal
+            open={open}
+            title={null}
+            footer={null}
+            width={560}
+            centered
+            onCancel={onCancel}
+            styles={{
+                root: { overflow: "hidden" },
+                body: { padding: 0, background: "#131116" },
+            }}
+        >
+            <div className="bg-[#131116] text-[#f2ede4]">
+                <div className="border-b border-[rgba(255,255,255,0.06)] bg-[#0a090c]/55 px-6 py-5">
+                    <p className="font-mono text-[0.625rem] uppercase tracking-[0.18em] text-[#8b8597]">Studio Model Settings</p>
+                    <h2 className="mt-2 text-xl font-semibold">生成设置</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#a8a2b0]">为当前 Studio 项目锁定文本、生图和视频模型；选择跟随全局时会使用应用配置里的默认模型。</p>
+                </div>
+                <div className="space-y-3 px-6 py-5">
+                    {modelFields.map((field) => {
+                        const options = buildModelSelectOptions(field.options, field.globalModel);
+                        return (
+                            <div key={field.key} className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#181620] p-4">
+                                <div className="mb-3 flex items-start justify-between gap-4">
+                                    <div>
+                                        <p className="font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">{field.eyebrow}</p>
+                                        <h3 className="mt-1 text-sm font-semibold text-[#f2ede4]">{field.title}</h3>
+                                    </div>
+                                    <span className="max-w-[15rem] truncate rounded-full border border-[rgba(255,255,255,0.06)] bg-[#0a090c] px-3 py-1 font-mono text-[0.625rem] text-[#a8a2b0]">全局：{field.globalModel || "未配置"}</span>
+                                </div>
+                                <Select className="w-full" value={draft[field.key]} options={options} onChange={(value) => updateDraft(field.key, value)} popupMatchSelectWidth={false} />
+                            </div>
+                        );
+                    })}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[rgba(255,255,255,0.06)] bg-[#0a090c]/45 px-6 py-4">
+                    <Button className={studioSecondaryButtonClass} icon={<Settings2 className="size-4" />} onClick={onOpenGlobalConfig}>
+                        全局配置
+                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button className="!rounded-full !border-[rgba(255,255,255,0.08)] !bg-transparent !text-[#a8a2b0] hover:!border-[rgba(255,255,255,0.16)] hover:!text-[#f2ede4]" onClick={onCancel}>
+                            取消
+                        </Button>
+                        <Button className={studioPrimaryButtonClass} icon={<Save className="size-4" />} loading={saving} onClick={onSave}>
+                            保存设置
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function buildModelSelectOptions(models: string[], globalModel: string) {
+    const normalized = Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
+    return [
+        {
+            label: `跟随全局配置${globalModel ? ` · ${globalModel}` : ""}`,
+            value: FOLLOW_GLOBAL_MODEL_VALUE,
+        },
+        ...normalized.map((model) => ({ label: model, value: model })),
+    ];
 }
 
 function StepStateIcon({ status }: { status: StudioPipelineStep["status"] }) {

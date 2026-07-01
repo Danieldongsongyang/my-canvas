@@ -696,3 +696,37 @@ Review 后修正：
 
 - Issue 5 已完成 ScriptProcessor、ArtDirection、Cast、StoryboardR2V 轻量版。
 - `Assembly` 仍是占位，原因不是 Issue 5 未完成，而是视频组装、混音和导出预览属于后续闭环切片。
+
+### 2026-07-02 07:40 Studio 生成设置面板
+
+本次补齐 Studio 工作区左侧底部的项目级生成设置入口。原先左侧底部只展示“当前模型 / 跟随全局配置”，但不能选择或保存模型；现在它会作为 Studio 项目的模型偏好设置入口。
+
+已完成：
+
+- 按 TDD 先补 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts`：
+  - `跟随全局配置` 会清空对应项目模型偏好。
+  - 具体模型会保存到 `series.modelPreferences.textModel / imageModel / videoModel`。
+  - 左侧摘要会按文本、图像、视频展示项目模型或全局 fallback。
+- 扩展 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.tsx`：
+  - 新增 `FOLLOW_GLOBAL_MODEL_VALUE`。
+  - 新增 `buildStudioModelPreferencesPatch()`。
+  - 新增 `buildStudioModelSummary()`。
+- 扩展 `web/src/app/(user)/studio/[seriesId]/page.tsx`：
+  - 左侧底部从只读“当前模型”升级为可点击的 LumenX dark glass 生成设置入口。
+  - 弹窗内可选择文本模型、生图模型、视频模型。
+  - 候选模型来自当前 `useConfigStore().config.textModels / imageModels / videoModels`，不引入 LumenX model catalog 作为运行时模型来源。
+  - 保存后写入当前 Studio 项目的 `modelPreferences`；选择“跟随全局配置”则不保存项目覆盖值。
+  - 保留“全局配置”入口，当前账号没有可用模型时可跳转到全局 AI 配置。
+
+当前已验证：
+
+- `bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts'`
+- `bun run typecheck`
+- `bun run test`
+- `git diff --check`
+- touched-file prettier check
+- 浏览器视觉核验：在本地 `http://127.0.0.1:3002/studio/:seriesId` 创建临时 Studio 项目，确认具体工作区隐藏全局顶部导航；左侧底部显示生成设置摘要；点击后弹出 LumenX dark glass 风格模型设置弹窗；保存后弹窗关闭且仍显示 Global fallback；临时项目已删除。
+
+待本次提交前继续验证：
+
+- 提交前最终 `git status --short` 确认只提交本次相关文件，不包含用户已有文档/AGENTS 改动。
