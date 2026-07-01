@@ -22,6 +22,7 @@ describe("desktop route guards", () => {
     it("sends authenticated users away from the login page and unauthenticated users to login for protected pages", () => {
         expect(resolveDesktopStartupRedirect("/login", "", true)).toBe("/");
         expect(resolveDesktopStartupRedirect("/canvas", "?project=demo", false)).toBe("/login?redirect=%2Fcanvas%3Fproject%3Ddemo");
+        expect(resolveDesktopStartupRedirect("/studio", "?series=demo", false)).toBe("/login?redirect=%2Fstudio%3Fseries%3Ddemo");
         expect(resolveDesktopStartupRedirect("/admin", "", false)).toBeNull();
     });
 });

@@ -3,14 +3,16 @@ import { describe, expect, it } from "vitest";
 import { createMangeBackendWebLinks, toolHubTools } from "@/lib/tool-hub";
 
 describe("tool hub", () => {
-    it("offers canvas as the primary tool and keeps the comic workflow as a placeholder", () => {
+    it("offers canvas and studio as ready creative tools", () => {
         expect(toolHubTools.map((tool) => tool.key)).toEqual(["canvas", "comic"]);
         expect(toolHubTools[0]).toMatchObject({
             href: "/canvas",
             status: "ready",
         });
         expect(toolHubTools[1]).toMatchObject({
-            status: "soon",
+            href: "/studio",
+            actionLabel: "进入 Studio",
+            status: "ready",
         });
     });
 

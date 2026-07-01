@@ -37,10 +37,10 @@ export const toolHubTools: ToolHubTool[] = [
     {
         key: "comic",
         title: "AI 漫剧生成",
-        description: "面向分镜、角色、旁白和连续镜头的生成流程，后续会作为独立工具开放。",
-        href: "",
-        actionLabel: "即将开放",
-        status: "soon",
+        description: "面向剧本、角色、场景和连续镜头的项目制短漫剧生产流程。",
+        href: "/studio",
+        actionLabel: "进入 Studio",
+        status: "ready",
     },
 ];
 

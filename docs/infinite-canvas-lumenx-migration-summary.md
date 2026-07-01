@@ -258,6 +258,32 @@ web/src/services/api/studio-generation.ts
 
 这样可以避免把 LumenX 原始 API 结构硬塞进自己的项目，也避免第一阶段把 mange-backend 扩张成 Studio 业务后端。
 
+---
+
+## 11. 实施进度记录
+
+> 本节用于中断后恢复上下文。每次实施应记录已完成切片、验证命令和下一步。
+
+### 2026-07-01
+
+- 状态：开始执行 Studio MVP 第一批实现切片。
+- 当前目标：优先完成 Issue 1「接入口和空 Studio 壳」，并补上 Issue 2 的最小 Studio 类型与本地仓储边界，让项目创建不直接依赖页面状态。
+- 已确认边界：不迁移 LumenX Playground，不新增 mange-backend Studio 业务接口，不接真实生成，不复制 LumenX 完整应用壳。
+- 待执行：先写工具入口、路由保护、Studio 仓储的回归测试，再实现 `/studio` 项目列表与 `/studio/[seriesId]` Episode 01 工作台壳。
+
+#### 15:30 进度
+
+- 已完成：工具入口页的“AI 漫剧生成”已从占位状态改为可进入 `/studio`。
+- 已完成：桌面端登录保护已覆盖 `/studio` 与 `/studio/[seriesId]`。
+- 已完成：新增 `web/src/services/studio-local.ts`，定义 `StudioSeries`、`StudioEpisode`、`StudioShot`、`StudioAssetRef` 等窄核心类型，并提供本地仓储边界。
+- 已完成：新增 `/studio` 项目库空态、创建项目弹窗、项目卡片与删除入口。
+- 已完成：新增 `/studio/[seriesId]` Episode 01 工作台壳，可查看项目、编辑并保存剧本草稿。
+- 已验证：`bun run test src/lib/tool-hub.test.ts src/lib/desktop-routes.test.ts src/services/studio-local.test.ts` 通过。
+- 已验证：`bun run typecheck` 通过。
+- 已验证：`bun run test` 全量测试通过。
+- 自审结果：未发现 Studio 页面直接依赖 localforage / IndexedDB；未新增 mange-backend Studio 业务接口；未迁移 LumenX 复杂组件或真实生成链路。
+- 下一步：Issue 3 asset-first 引用边界，或 Issue 4 剧本解析真实 relay 闭环。
+
 媒体层口径：
 
 ```text
