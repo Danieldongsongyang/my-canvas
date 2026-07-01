@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Alert, App, Button, Input, List, Tag } from "antd";
-import { ArrowLeft, Check, ChevronRight, Lock, Save, WandSparkles } from "lucide-react";
+import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Plus, Save, Sparkles, Users, WandSparkles } from "lucide-react";
 
 import { normalizeScriptStructure, parseAndApplyScript, StudioGenerationError } from "@/services/api/studio-generation";
 import { studioRepository, type StudioEpisode, type StudioSeries } from "@/services/studio-local";
 import { useConfigStore } from "@/stores/use-config-store";
-import { buildStudioPipelineSteps, formatEpisodeStructure, type StudioPipelineStep } from "./studio-workspace-model";
+import { buildCastSections, buildStoryboardCards, buildStudioPipelineSteps, formatEpisodeStructure, normalizeArtDirectionDraft, readArtDirectionDraft, STUDIO_STYLE_PRESETS, type StudioPipelineStep, type StudioStylePreset } from "./studio-workspace-model";
 
 export default function StudioWorkspacePage() {
     const { message } = App.useApp();
@@ -23,6 +23,11 @@ export default function StudioWorkspacePage() {
     const [structureDraft, setStructureDraft] = useState("");
     const [savingStructure, setSavingStructure] = useState(false);
     const [activeStep, setActiveStep] = useState<StudioPipelineStep["id"]>("script");
+    const [selectedStyleId, setSelectedStyleId] = useState(STUDIO_STYLE_PRESETS[0].id);
+    const [styleName, setStyleName] = useState(STUDIO_STYLE_PRESETS[0].name);
+    const [positivePrompt, setPositivePrompt] = useState(STUDIO_STYLE_PRESETS[0].positivePrompt);
+    const [negativePrompt, setNegativePrompt] = useState(STUDIO_STYLE_PRESETS[0].negativePrompt);
+    const [savingArtDirection, setSavingArtDirection] = useState(false);
     const config = useConfigStore((state) => state.config);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -31,12 +36,23 @@ export default function StudioWorkspacePage() {
     const textModel = series?.modelPreferences.textModel || config.textModel || config.model;
     const steps = useMemo(() => (episode ? buildStudioPipelineSteps(episode) : []), [episode]);
 
+    const syncArtDirectionDraft = (nextEpisode: StudioEpisode | null) => {
+        const draft = nextEpisode ? readArtDirectionDraft(nextEpisode) : null;
+        const preset = STUDIO_STYLE_PRESETS.find((item) => item.id === draft?.presetId) ?? STUDIO_STYLE_PRESETS[0];
+        setSelectedStyleId(draft?.presetId ?? preset.id);
+        setStyleName(draft?.name ?? preset.name);
+        setPositivePrompt(draft?.positivePrompt ?? preset.positivePrompt);
+        setNegativePrompt(draft?.negativePrompt ?? preset.negativePrompt);
+    };
+
     useEffect(() => {
         async function loadSeries() {
             const nextSeries = await studioRepository.getSeries(params.seriesId);
+            const nextEpisode = nextSeries?.episodes[0] ?? null;
             setSeries(nextSeries);
-            setScript(nextSeries?.episodes[0]?.script ?? "");
-            setStructureDraft(formatEpisodeStructure(nextSeries?.episodes[0] ?? null));
+            setScript(nextEpisode?.script ?? "");
+            setStructureDraft(formatEpisodeStructure(nextEpisode));
+            syncArtDirectionDraft(nextEpisode);
             setHydrated(true);
         }
 
@@ -123,6 +139,38 @@ export default function StudioWorkspacePage() {
         }
     };
 
+    const applyStylePreset = (preset: StudioStylePreset) => {
+        setSelectedStyleId(preset.id);
+        setStyleName(preset.name);
+        setPositivePrompt(preset.positivePrompt);
+        setNegativePrompt(preset.negativePrompt);
+    };
+
+    const saveArtDirection = async () => {
+        if (!series || !episode) return;
+        setSavingArtDirection(true);
+        try {
+            const artDirection = normalizeArtDirectionDraft({
+                presetId: selectedStyleId,
+                name: styleName,
+                positivePrompt,
+                negativePrompt,
+            });
+            const result = await studioRepository.updateEpisode(series.id, episode.id, {
+                generation: {
+                    ...episode.generation,
+                    artDirection,
+                },
+            });
+            setSeries(result.series);
+            syncArtDirectionDraft(result.episode);
+            setActiveStep("cast");
+            message.success("视觉风格已保存");
+        } finally {
+            setSavingArtDirection(false);
+        }
+    };
+
     if (!hydrated) {
         return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500 dark:text-stone-400">正在加载 Studio 工作台...</main>;
     }
@@ -158,6 +206,24 @@ export default function StudioWorkspacePage() {
                         onStructureDraftChange={setStructureDraft}
                         onSaveStructureDraft={saveStructureDraft}
                     />
+                ) : activeStep === "art_direction" ? (
+                    <ArtDirectionStep
+                        episode={episode}
+                        selectedStyleId={selectedStyleId}
+                        styleName={styleName}
+                        positivePrompt={positivePrompt}
+                        negativePrompt={negativePrompt}
+                        saving={savingArtDirection}
+                        onSelectPreset={applyStylePreset}
+                        onStyleNameChange={setStyleName}
+                        onPositivePromptChange={setPositivePrompt}
+                        onNegativePromptChange={setNegativePrompt}
+                        onSave={saveArtDirection}
+                    />
+                ) : activeStep === "cast" ? (
+                    <CastStep episode={episode} />
+                ) : activeStep === "storyboard_r2v" ? (
+                    <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} />
                 ) : (
                     <ComingStep step={steps.find((step) => step.id === activeStep)} episode={episode} />
                 )}
@@ -311,6 +377,329 @@ function ScriptProcessorStep({
                     </section>
                 </div>
             </aside>
+        </div>
+    );
+}
+
+function ArtDirectionStep({
+    episode,
+    selectedStyleId,
+    styleName,
+    positivePrompt,
+    negativePrompt,
+    saving,
+    onSelectPreset,
+    onStyleNameChange,
+    onPositivePromptChange,
+    onNegativePromptChange,
+    onSave,
+}: {
+    episode: StudioEpisode;
+    selectedStyleId: string;
+    styleName: string;
+    positivePrompt: string;
+    negativePrompt: string;
+    saving: boolean;
+    onSelectPreset: (preset: StudioStylePreset) => void;
+    onStyleNameChange: (value: string) => void;
+    onPositivePromptChange: (value: string) => void;
+    onNegativePromptChange: (value: string) => void;
+    onSave: () => void;
+}) {
+    const savedDraft = readArtDirectionDraft(episode);
+    const selectedPreset = STUDIO_STYLE_PRESETS.find((preset) => preset.id === selectedStyleId) ?? STUDIO_STYLE_PRESETS[0];
+    const recommendations = STUDIO_STYLE_PRESETS.slice(0, 2);
+    const categories = [
+        { id: "all", label: "全部" },
+        { id: "cinematic", label: "电影" },
+        { id: "anime", label: "动画" },
+        { id: "ink", label: "水墨" },
+        { id: "editorial", label: "图形" },
+    ];
+    const [activeCategory, setActiveCategory] = useState("all");
+    const visiblePresets = activeCategory === "all" ? STUDIO_STYLE_PRESETS : STUDIO_STYLE_PRESETS.filter((preset) => preset.category === activeCategory);
+
+    return (
+        <div className="flex h-full w-full flex-col overflow-hidden">
+            <StepPageHeader
+                stepNumber={2}
+                englishName="STYLE"
+                title="美术方向"
+                subtitle="选择或改写视觉风格，让后续角色、场景和分镜共用同一套美术语言。"
+                pills={
+                    <>
+                        <StepPill label="当前" value={savedDraft?.name ?? "未保存"} />
+                        <StepPill label="预设" value={STUDIO_STYLE_PRESETS.length} />
+                    </>
+                }
+            />
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[#141517] p-7">
+                <section className="mb-7">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <h3 className="flex items-center gap-2 text-lg font-semibold text-[#f2eee7]">
+                            <Sparkles className="size-5 text-[#f0b45a]" />
+                            推荐风格
+                        </h3>
+                        <Button icon={<WandSparkles className="size-4" />} onClick={() => onSelectPreset(recommendations[0])}>
+                            根据当前剧本推荐
+                        </Button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                        {recommendations.map((preset) => (
+                            <StylePresetCard key={preset.id} preset={preset} selected={selectedStyleId === preset.id} tone="recommendation" onSelect={() => onSelectPreset(preset)} />
+                        ))}
+                    </div>
+                </section>
+
+                <section className="mb-7">
+                    <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-[#f2eee7]">
+                        <Palette className="size-5 text-[#49d2c6]" />
+                        内置预设
+                    </h3>
+                    <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1">
+                        {categories.map((category) => (
+                            <button
+                                key={category.id}
+                                className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                                    activeCategory === category.id ? "border-[#49d2c6]/40 bg-[#49d2c6]/15 text-[#49d2c6]" : "border-transparent bg-white/[0.055] text-[#aaa49c] hover:text-[#f2eee7]"
+                                }`}
+                                onClick={() => setActiveCategory(category.id)}
+                            >
+                                {category.label}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-4">
+                        {visiblePresets.map((preset) => (
+                            <StylePresetCard key={preset.id} preset={preset} selected={selectedStyleId === preset.id} onSelect={() => onSelectPreset(preset)} />
+                        ))}
+                    </div>
+                </section>
+            </div>
+            <div className="grid shrink-0 grid-cols-1 gap-4 border-t border-white/10 bg-[#18191c]/95 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,480px)]">
+                <div className="min-w-0">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase text-[#8d867c]">
+                        <Pencil className="size-3.5" />
+                        Prompt Editor
+                    </div>
+                    <Input value={styleName} onChange={(event) => onStyleNameChange(event.target.value)} className="mb-3" placeholder="风格名称" />
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                        <Input.TextArea value={positivePrompt} autoSize={{ minRows: 4, maxRows: 6 }} onChange={(event) => onPositivePromptChange(event.target.value)} placeholder="正向风格提示词" />
+                        <Input.TextArea value={negativePrompt} autoSize={{ minRows: 4, maxRows: 6 }} onChange={(event) => onNegativePromptChange(event.target.value)} placeholder="负向提示词" />
+                    </div>
+                </div>
+                <div className="flex min-w-0 flex-col justify-between rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                    <div>
+                        <p className="text-xs text-[#8d867c]">当前选择</p>
+                        <h3 className="mt-2 text-xl font-semibold text-[#f2eee7]">{styleName || selectedPreset.name}</h3>
+                        <p className="mt-2 text-sm leading-6 text-[#aaa49c]">{selectedPreset.subtitle}</p>
+                    </div>
+                    <Button type="primary" size="large" icon={<ChevronRight className="size-4" />} loading={saving} disabled={!positivePrompt.trim()} onClick={onSave}>
+                        应用并继续
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function StylePresetCard({ preset, selected, tone, onSelect }: { preset: StudioStylePreset; selected: boolean; tone?: "recommendation"; onSelect: () => void }) {
+    return (
+        <button
+            className={`group overflow-hidden rounded-lg border text-left transition ${
+                selected ? "border-[#49d2c6]/70 bg-[#49d2c6]/10 shadow-[0_0_0_1px_rgba(73,210,198,0.18)]" : "border-white/10 bg-white/[0.04] hover:border-white/25 hover:bg-white/[0.065]"
+            }`}
+            onClick={onSelect}
+        >
+            <div className="aspect-[4/2] p-3">
+                <div className="flex h-full overflow-hidden rounded-md border border-white/10">
+                    {preset.swatches.map((color) => (
+                        <span key={color} className="flex-1" style={{ backgroundColor: color }} />
+                    ))}
+                </div>
+            </div>
+            <div className="px-4 pb-4">
+                <div className="flex items-center gap-2">
+                    {tone ? <span className="rounded-md border border-[#f0b45a]/25 bg-[#f0b45a]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#f0b45a]">AI</span> : null}
+                    <h4 className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f2eee7]">{preset.name}</h4>
+                    {selected ? <Check className="size-4 shrink-0 text-[#49d2c6]" /> : null}
+                </div>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8d867c]">{preset.subtitle}</p>
+            </div>
+        </button>
+    );
+}
+
+function CastStep({ episode }: { episode: StudioEpisode }) {
+    const sections = buildCastSections(episode);
+    const total = sections.reduce((sum, section) => sum + section.items.length, 0);
+    const readyCount = sections.reduce((sum, section) => sum + section.items.filter((item) => item.status === "ready").length, 0);
+    const [activeKind, setActiveKind] = useState<"all" | "character" | "scene" | "prop">("all");
+    const visibleSections = activeKind === "all" ? sections : sections.filter((section) => section.kind === activeKind);
+
+    return (
+        <div className="flex h-full w-full flex-col overflow-hidden">
+            <StepPageHeader
+                stepNumber={3}
+                englishName="CAST"
+                title="本集素材"
+                subtitle="从剧本解析出的角色、场景和道具生成本集素材清单，先作为 R2V 前的资产透视。"
+                pills={
+                    <>
+                        <StepPill label="素材" value={total} />
+                        <StepPill label="已有引用" value={readyCount} />
+                    </>
+                }
+                trailing={
+                    <Button icon={<Plus className="size-4" />} disabled>
+                        新增素材
+                    </Button>
+                }
+            />
+            <div className="border-b border-white/10 bg-[#18191c] px-6 pt-3">
+                {[
+                    { id: "all" as const, label: "全部", icon: <Layers className="size-3.5" />, count: total },
+                    { id: "character" as const, label: "角色", icon: <Users className="size-3.5" />, count: sections[0].items.length },
+                    { id: "scene" as const, label: "场景", icon: <MapPin className="size-3.5" />, count: sections[1].items.length },
+                    { id: "prop" as const, label: "道具", icon: <Box className="size-3.5" />, count: sections[2].items.length },
+                ].map((tab) => (
+                    <button
+                        key={tab.id}
+                        className={`relative mr-5 inline-flex items-center gap-1.5 pb-3 text-xs uppercase transition ${activeKind === tab.id ? "text-[#f2eee7]" : "text-[#8d867c] hover:text-[#f2eee7]"}`}
+                        onClick={() => setActiveKind(tab.id)}
+                    >
+                        {tab.icon}
+                        {tab.label}
+                        <span className="text-[#49d2c6]">{tab.count}</span>
+                        {activeKind === tab.id ? <span className="absolute inset-x-0 bottom-0 h-px bg-[#49d2c6]" /> : null}
+                    </button>
+                ))}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[#141517] p-7">
+                {total === 0 ? (
+                    <EmptyStudioPanel icon={<Sparkles className="size-7" />} title="还没有本集素材" body="先在 Script 步骤提取角色、场景、道具，Cast 会自动汇总成本集资产清单。" />
+                ) : (
+                    <div className="space-y-8">
+                        {visibleSections.map((section) => (
+                            <section key={section.id}>
+                                <h3 className="mb-4 text-lg font-semibold text-[#f2eee7]">{section.title}</h3>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                    {section.items.map((item) => (
+                                        <CastAssetCard key={item.id} item={item} />
+                                    ))}
+                                </div>
+                            </section>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function CastAssetCard({ item }: { item: ReturnType<typeof buildCastSections>[number]["items"][number] }) {
+    return (
+        <article className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+            <div className="mb-4 flex aspect-[16/9] items-center justify-center rounded-md border border-dashed border-white/15 bg-black/20 text-[#7f796f]">
+                <Image className="size-7" />
+            </div>
+            <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                    <h4 className="truncate text-base font-semibold text-[#f2eee7]">{item.name}</h4>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8d867c]">{item.description || "暂无描述"}</p>
+                </div>
+                <Tag color={item.status === "ready" ? "success" : "warning"}>{item.status === "ready" ? "ready" : "pending"}</Tag>
+            </div>
+            <p className="mt-3 text-xs text-[#7f796f]">出现次数：{item.appearances}</p>
+        </article>
+    );
+}
+
+function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; onJumpToScript: () => void }) {
+    const cards = buildStoryboardCards(episode);
+    const canGenerate = episode.script.trim().length >= 40 && episode.characters.length > 0;
+
+    return (
+        <div className="flex h-full w-full flex-col overflow-hidden">
+            <StepPageHeader
+                stepNumber={4}
+                englishName="STORYBOARD"
+                title="分镜 R2V"
+                subtitle="轻量迁移 LumenX StoryboardR2V：先承接分镜草稿、镜头 prompt 和生成前置检查。"
+                pills={
+                    <>
+                        <StepPill label="镜头" value={cards.length} />
+                        <StepPill label="对白" value={cards.filter((card) => card.hasDialogue).length} />
+                    </>
+                }
+                trailing={
+                    <Button type="primary" icon={<WandSparkles className="size-4" />} disabled={!canGenerate}>
+                        从剧本生成分镜
+                    </Button>
+                }
+            />
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-[#141517] xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="min-h-0 overflow-y-auto p-7">
+                    {cards.length === 0 ? (
+                        <EmptyStudioPanel icon={<Clapperboard className="size-7" />} title="还没有分镜" body="Script 步骤提取后会生成第一版分镜草稿；这里会继续承接图像候选和 R2V 生成。" />
+                    ) : (
+                        <div className="space-y-4">
+                            {cards.map((card) => (
+                                <article key={card.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                                    <div className="flex items-start gap-4">
+                                        <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#49d2c6]/25 bg-[#49d2c6]/10 text-sm font-semibold text-[#49d2c6]">{String(card.order).padStart(2, "0")}</div>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="mb-2 flex items-center gap-2">
+                                                <h3 className="text-base font-semibold text-[#f2eee7]">{card.title}</h3>
+                                                {card.hasDialogue ? <Tag color="blue">对白</Tag> : null}
+                                                <Tag color="default">候选 {card.candidateCount}</Tag>
+                                            </div>
+                                            <p className="whitespace-pre-wrap text-sm leading-7 text-[#aaa49c]">{card.prompt}</p>
+                                        </div>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <aside className="flex h-full flex-col border-t border-white/10 bg-[#1b1b1f]/95 xl:border-l xl:border-t-0">
+                    <SidePanelHeader title="生成前检查" subtitle="对应 LumenX StoryboardGenerateDialog" trailing={<Film className="size-4 text-[#49d2c6]" />} />
+                    <div className="space-y-3 p-4">
+                        <PreflightRow passed={episode.script.trim().length >= 40} title="剧本文本足够长" hint="建议先在 Script 中保存完整剧本。" />
+                        <PreflightRow passed={episode.characters.length > 0} title="已有角色清单" hint="先提取或手动保存 characters。" />
+                        <PreflightRow passed={cards.length > 0} title="已有分镜草稿" hint="解析剧本后会写入 shotDrafts。" />
+                        {!canGenerate ? (
+                            <Button block onClick={onJumpToScript}>
+                                回到 Script 修正
+                            </Button>
+                        ) : null}
+                    </div>
+                </aside>
+            </div>
+        </div>
+    );
+}
+
+function PreflightRow({ passed, title, hint }: { passed: boolean; title: string; hint: string }) {
+    return (
+        <div className={`rounded-lg border px-3 py-2 ${passed ? "border-[#49d2c6]/25 bg-[#49d2c6]/10" : "border-[#f0b45a]/30 bg-[#f0b45a]/10"}`}>
+            <div className="flex items-center gap-2 text-sm text-[#f2eee7]">
+                <span className={`grid size-5 place-items-center rounded-full text-xs ${passed ? "bg-[#49d2c6]/20 text-[#49d2c6]" : "bg-[#f0b45a]/20 text-[#f0b45a]"}`}>{passed ? "✓" : "!"}</span>
+                {title}
+            </div>
+            {!passed ? <p className="mt-1 pl-7 text-xs text-[#8d867c]">{hint}</p> : null}
+        </div>
+    );
+}
+
+function EmptyStudioPanel({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
+    return (
+        <div className="flex h-full items-center justify-center text-center">
+            <div className="max-w-md">
+                <div className="mx-auto mb-4 grid size-16 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-[#8d867c]">{icon}</div>
+                <h3 className="text-xl font-semibold text-[#f2eee7]">{title}</h3>
+                <p className="mt-2 text-sm leading-7 text-[#8d867c]">{body}</p>
+            </div>
         </div>
     );
 }

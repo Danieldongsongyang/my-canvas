@@ -604,3 +604,50 @@ Backend = 账号、额度、模型渠道和 AI relay
 ## 15. 一句话版
 
 **不要把 LumenX Playground 搬进来；把 LumenX Studio 改造成自己的短漫剧模块，并让它和现有无限画布、素材库、后端任务系统打通。**
+
+---
+
+## 16. 实施进度记录
+
+### 2026-07-01 17:20 Issue 5 第二段/收尾
+
+本次继续执行 Issue 5：在上一段已经完成 LumenX 式 Studio 工作台壳、左侧 PipelineRail、ScriptProcessor 迁移的基础上，继续迁移 ArtDirection，并尽量完成 Issue 5 剩余组件。
+
+已完成：
+
+- 参考 LumenX 源文件：
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ArtDirection.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/Cast.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/StoryboardR2V.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/storyboard-r2v/StoryboardGenerateDialog.tsx`
+- 按 TDD 先补 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts`：
+  - ArtDirection 草稿会归一化为 `episode.generation.artDirection` 可保存结构。
+  - Cast 会从当前 Episode 的 characters / scenes / props 和 shot 文本提及生成三组素材清单。
+  - StoryboardR2V 轻量卡片会按镜头顺序生成 prompt，并保留对白标记。
+- 扩展 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.tsx`：
+  - 新增本地 `STUDIO_STYLE_PRESETS`，避免依赖 LumenX 后端风格预设接口。
+  - 新增 `normalizeArtDirectionDraft()`、`readArtDirectionDraft()`。
+  - 新增 `buildCastSections()`、`buildStoryboardCards()`。
+- 扩展 `web/src/app/(user)/studio/[seriesId]/page.tsx`：
+  - `art_direction` 不再是占位页，已迁移为 LumenX 风格的推荐风格、内置预设、分类切换、prompt 编辑和底部“应用并继续”保存栏。
+  - 风格保存写入当前 Episode 的 `generation.artDirection`，并保留已有 `generation` 元数据。
+  - `cast` 不再是占位页，已迁移为本集角色/场景/道具三类资产透视，带全部/角色/场景/道具 tab、出现次数和 ready/pending 状态。
+  - `storyboard_r2v` 不再是占位页，已迁移为轻量 StoryboardR2V 工作区：按 Episode shots 展示镜头卡、prompt、对白标记、候选计数，以及右侧生成前检查。
+  - `assembly` 仍保留占位，因为 Issue 5 明确只要求 ScriptProcessor、ArtDirection、Cast、StoryboardR2V 轻量版；完整 assembly/export 属于后续 MVP-after 范围。
+
+当前已验证：
+
+- `bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts'`
+- `bun run typecheck`
+
+Review 后修正：
+
+- ArtDirection 的“应用并继续”保存成功后会切到 Cast 步骤，避免文案和行为不一致。
+- ArtDirection 底部 prompt 编辑区、StoryboardR2V 主区/右侧检查栏增加响应式单列降级，避免窄屏固定双栏挤压。
+
+待本次提交前继续验证：
+
+- 相关 Studio/API 测试组合。
+- 全量 `bun run test`。
+- `git diff --check`。
+- touched-file 格式化检查。

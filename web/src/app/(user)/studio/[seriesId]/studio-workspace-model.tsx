@@ -11,6 +11,89 @@ export type StudioPipelineStep = {
     statusLabel?: string;
 };
 
+export type StudioArtDirectionDraft = {
+    status: "completed";
+    presetId: string;
+    name: string;
+    positivePrompt: string;
+    negativePrompt: string;
+    savedAt: string;
+};
+
+export type StudioStylePreset = {
+    id: string;
+    category: "cinematic" | "anime" | "ink" | "editorial";
+    name: string;
+    subtitle: string;
+    positivePrompt: string;
+    negativePrompt: string;
+    swatches: string[];
+};
+
+export type StudioCastItem = {
+    id: string;
+    name: string;
+    description: string;
+    kind: "character" | "scene" | "prop";
+    appearances: number;
+    status: "ready" | "pending";
+};
+
+export type StudioCastSection = {
+    id: "characters" | "scenes" | "props";
+    title: string;
+    kind: StudioCastItem["kind"];
+    items: StudioCastItem[];
+};
+
+export type StudioStoryboardCard = {
+    id: string;
+    title: string;
+    order: number;
+    prompt: string;
+    hasDialogue: boolean;
+    candidateCount: number;
+};
+
+export const STUDIO_STYLE_PRESETS: StudioStylePreset[] = [
+    {
+        id: "cinematic-neon-noir",
+        category: "cinematic",
+        name: "雨夜霓虹电影感",
+        subtitle: "高反差、湿润街面、青绿色轮廓光",
+        positivePrompt: "cinematic neon noir, rainy night, wet asphalt reflections, teal rim light, dramatic shadows, production still, detailed character lighting",
+        negativePrompt: "flat lighting, low detail, overexposed, blurry, distorted anatomy, cheap plastic texture",
+        swatches: ["#101113", "#49d2c6", "#f0b45a"],
+    },
+    {
+        id: "anime-key-visual",
+        category: "anime",
+        name: "动画主视觉",
+        subtitle: "清晰角色线稿、明亮边缘、高饱和情绪色",
+        positivePrompt: "anime key visual, clean line art, expressive eyes, crisp cel shading, vivid accent colors, cinematic composition, high detail background",
+        negativePrompt: "messy lineart, muddy colors, photorealistic skin, low resolution, extra fingers",
+        swatches: ["#161821", "#ff6b8b", "#ffd166"],
+    },
+    {
+        id: "ink-wash-fantasy",
+        category: "ink",
+        name: "水墨奇幻",
+        subtitle: "宣纸颗粒、留白、墨色层次和轻微金色点缀",
+        positivePrompt: "modern ink wash fantasy, rice paper texture, elegant negative space, layered black ink, subtle gold accents, cinematic framing",
+        negativePrompt: "heavy western oil paint, noisy texture, oversaturated colors, flat composition",
+        swatches: ["#171717", "#d8d0c4", "#c8a45d"],
+    },
+    {
+        id: "editorial-graphic",
+        category: "editorial",
+        name: "杂志图形感",
+        subtitle: "强构图、块面色彩、干净背景，适合短剧封面感",
+        positivePrompt: "editorial graphic illustration, bold composition, clean background, sharp silhouette, controlled color blocks, premium poster design",
+        negativePrompt: "busy background, random decorations, weak silhouette, low contrast, generic stock photo",
+        swatches: ["#f2eee7", "#101113", "#e24d42"],
+    },
+];
+
 export function buildStudioPipelineSteps(episode: StudioEpisode): StudioPipelineStep[] {
     const hasParsedScript = Boolean(episode.generation?.scriptParser);
     const hasArtDirection = Boolean(episode.generation?.artDirection);
@@ -68,4 +151,92 @@ export function formatEpisodeStructure(episode: StudioEpisode | null) {
         null,
         2,
     );
+}
+
+export function normalizeArtDirectionDraft(input: { presetId?: string; name?: string; positivePrompt?: string; negativePrompt?: string }): StudioArtDirectionDraft {
+    const fallback = STUDIO_STYLE_PRESETS[0];
+    const preset = STUDIO_STYLE_PRESETS.find((item) => item.id === input.presetId) ?? fallback;
+    return {
+        status: "completed",
+        presetId: input.presetId || preset.id,
+        name: input.name?.trim() || preset.name,
+        positivePrompt: input.positivePrompt?.trim() || preset.positivePrompt,
+        negativePrompt: input.negativePrompt?.trim() || preset.negativePrompt,
+        savedAt: new Date().toISOString(),
+    };
+}
+
+export function readArtDirectionDraft(episode: StudioEpisode): StudioArtDirectionDraft | null {
+    const value = episode.generation?.artDirection;
+    if (!value || typeof value !== "object") return null;
+    const draft = value as Partial<StudioArtDirectionDraft>;
+    if (!draft.positivePrompt || !draft.name) return null;
+    return {
+        status: "completed",
+        presetId: draft.presetId || "custom",
+        name: draft.name,
+        positivePrompt: draft.positivePrompt,
+        negativePrompt: draft.negativePrompt || "",
+        savedAt: draft.savedAt || "",
+    };
+}
+
+export function buildCastSections(episode: StudioEpisode): StudioCastSection[] {
+    return [
+        {
+            id: "characters",
+            title: "角色",
+            kind: "character",
+            items: episode.characters.map((item) => buildCastItem(item, "character", episode)),
+        },
+        {
+            id: "scenes",
+            title: "场景",
+            kind: "scene",
+            items: episode.scenes.map((item) => buildCastItem(item, "scene", episode)),
+        },
+        {
+            id: "props",
+            title: "道具",
+            kind: "prop",
+            items: episode.props.map((item) => buildCastItem(item, "prop", episode)),
+        },
+    ];
+}
+
+export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCard[] {
+    return [...episode.shots]
+        .sort((a, b) => a.order - b.order)
+        .map((shot) => {
+            const prompt = shot.dialogue ? `${shot.description}\n对白：${shot.dialogue}` : shot.description;
+            return {
+                id: shot.id,
+                title: shot.title,
+                order: shot.order,
+                prompt,
+                hasDialogue: Boolean(shot.dialogue?.trim()),
+                candidateCount: shot.assetRefs.filter((ref) => ref.role === "candidate" || ref.role === "selected").length,
+            };
+        });
+}
+
+function buildCastItem(item: { id: string; name: string; description: string; assetRefs: unknown[] }, kind: StudioCastItem["kind"], episode: StudioEpisode): StudioCastItem {
+    const appearances = episode.shots.reduce((count, shot) => {
+        const haystack = `${shot.title}\n${shot.description}\n${shot.dialogue ?? ""}`;
+        return count + countTextMentions(haystack, item.name);
+    }, 0);
+    return {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        kind,
+        appearances,
+        status: item.assetRefs.length > 0 ? "ready" : "pending",
+    };
+}
+
+function countTextMentions(text: string, term: string) {
+    const normalized = term.trim();
+    if (!normalized) return 0;
+    return text.split(normalized).length - 1;
 }

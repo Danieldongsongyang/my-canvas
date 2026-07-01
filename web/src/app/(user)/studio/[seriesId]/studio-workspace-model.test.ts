@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStudioPipelineSteps, formatEpisodeStructure } from "./studio-workspace-model";
+import { buildCastSections, buildStoryboardCards, buildStudioPipelineSteps, formatEpisodeStructure, normalizeArtDirectionDraft, STUDIO_STYLE_PRESETS } from "./studio-workspace-model";
 import type { StudioEpisode } from "@/services/studio-local";
 
 function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
@@ -69,5 +69,64 @@ describe("studio workspace model", () => {
                 2,
             ),
         );
+    });
+
+    it("normalizes ArtDirection drafts into saved episode generation metadata", () => {
+        const draft = normalizeArtDirectionDraft({
+            presetId: STUDIO_STYLE_PRESETS[0].id,
+            name: STUDIO_STYLE_PRESETS[0].name,
+            positivePrompt: "cinematic ink, rainy neon",
+            negativePrompt: "low quality, blurry",
+        });
+
+        expect(draft).toMatchObject({
+            status: "completed",
+            presetId: STUDIO_STYLE_PRESETS[0].id,
+            name: STUDIO_STYLE_PRESETS[0].name,
+            positivePrompt: "cinematic ink, rainy neon",
+            negativePrompt: "low quality, blurry",
+        });
+        expect(typeof draft.savedAt).toBe("string");
+    });
+
+    it("builds Cast sections from current episode entities and shot mentions", () => {
+        const sections = buildCastSections(
+            episode({
+                characters: [
+                    { id: "c1", name: "阿岚", description: "夜班店员", assetRefs: [] },
+                    { id: "c2", name: "青蛇", description: "神秘访客", assetRefs: [] },
+                ],
+                scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", assetRefs: [] }],
+                props: [{ id: "p1", name: "贝壳", description: "会发光", assetRefs: [] }],
+                shots: [
+                    { id: "shot-1", title: "阿岚开门", order: 1, description: "便利店门铃响起，阿岚看见贝壳", assetRefs: [] },
+                    { id: "shot-2", title: "青蛇登场", order: 2, description: "青蛇走进便利店", assetRefs: [] },
+                ],
+            }),
+        );
+
+        expect(sections.map((section) => section.id)).toEqual(["characters", "scenes", "props"]);
+        expect(sections[0].items).toMatchObject([
+            { id: "c1", name: "阿岚", appearances: 2, status: "pending" },
+            { id: "c2", name: "青蛇", appearances: 2, status: "pending" },
+        ]);
+        expect(sections[1].items[0]).toMatchObject({ name: "便利店", appearances: 2 });
+        expect(sections[2].items[0]).toMatchObject({ name: "贝壳", appearances: 1 });
+    });
+
+    it("builds lightweight StoryboardR2V cards from ordered episode shots", () => {
+        expect(
+            buildStoryboardCards(
+                episode({
+                    shots: [
+                        { id: "shot-2", title: "第二镜", order: 2, description: "青蛇回头", dialogue: "你终于来了。", assetRefs: [] },
+                        { id: "shot-1", title: "第一镜", order: 1, description: "雨落在玻璃门上", assetRefs: [] },
+                    ],
+                }),
+            ),
+        ).toMatchObject([
+            { id: "shot-1", title: "第一镜", order: 1, prompt: "雨落在玻璃门上", hasDialogue: false },
+            { id: "shot-2", title: "第二镜", order: 2, prompt: "青蛇回头\n对白：你终于来了。", hasDialogue: true },
+        ]);
     });
 });
