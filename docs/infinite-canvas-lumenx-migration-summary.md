@@ -651,3 +651,39 @@ Review 后修正：
 - 全量 `bun run test`。
 - `git diff --check`。
 - touched-file 格式化检查。
+
+### 2026-07-01 18:10 Issue 5 风格校准
+
+本次根据反馈暂停继续发散设计，改为把当前 Studio 工作区视觉重新拉回 LumenX 工作画面基线。注意：这里不是新增 Issue 6，而是 Issue 5 已完成产物的风格纠偏。
+
+已完成：
+
+- 重新对照 LumenX 源文件和共享组件：
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/shared/StepPageHeader.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/shared/WorkflowActionButton.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ScriptProcessor.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ArtDirection.tsx`
+  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/StoryboardR2V.tsx`
+- 在 `web/src/app/(user)/studio/[seriesId]/page.tsx` 增加 Studio 局部 Ant Design dark theme，使 Button/Input/Tag 更接近 LumenX 的 dark glass 工作台，而不是当前项目默认黑白中性主题。
+- 把工作区主背景、侧栏、页面头部、结构侧栏、卡片、空状态、检查项从上一版手写暗色改为更贴近 LumenX 的 atelier token：
+  - base `#0c0b0e`
+  - surface `#131116`
+  - elevated `#181620`
+  - inset `#0a090c`
+  - primary `#34d8c4`
+  - accent `#ffa94d`
+  - foreground `#f2ede4`
+- 重做 `PipelineRail` 的视觉密度：LumenX 式 inset 侧栏、mono 小标签、低亮度状态说明、glass hover/active 和竖向流程线。
+- 重做 `StepPageHeader` / `StepPill` / `SidePanelHeader`，对齐 LumenX 的 `STEP 0N · NAME` 头部层级和 pill 信息胶囊。
+- 把主行动/次行动按钮改为 LumenX 风格 rounded-full frosted 按钮，优先减少 Ant 默认方角按钮带来的“不是同一个产品”的感觉。
+- 调整 `web/src/components/layout/app-top-nav.tsx`：具体 Studio 工作区 `/studio/:seriesId` 像 `/canvas/:id` 一样隐藏全局顶部导航，保留 `/studio` 项目库导航，避免工作台顶部被无限画布全局 chrome 打断。
+- 保持 Issue 5 业务行为不变：Script、ArtDirection、Cast、StoryboardR2V 轻量版的数据流和保存逻辑没有扩大范围。
+
+当前已验证：
+
+- `bun run typecheck`
+- `bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts'`
+- `bun run test`
+- `git diff --check`
+- touched-file prettier check
+- 已通过内置浏览器进入本地 `http://127.0.0.1:3002/studio/:seriesId` 并截图核验：顶部全局导航已隐藏，工作区进入沉浸式 LumenX dark glass 布局。

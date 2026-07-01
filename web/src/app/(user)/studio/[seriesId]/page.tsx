@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Alert, App, Button, Input, List, Tag } from "antd";
+import { Alert, App, Button, ConfigProvider, Input, List, Tag, theme as antdTheme } from "antd";
 import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Plus, Save, Sparkles, Users, WandSparkles } from "lucide-react";
 
 import { normalizeScriptStructure, parseAndApplyScript, StudioGenerationError } from "@/services/api/studio-generation";
 import { studioRepository, type StudioEpisode, type StudioSeries } from "@/services/studio-local";
 import { useConfigStore } from "@/stores/use-config-store";
+import { cn } from "@/lib/utils";
 import { buildCastSections, buildStoryboardCards, buildStudioPipelineSteps, formatEpisodeStructure, normalizeArtDirectionDraft, readArtDirectionDraft, STUDIO_STYLE_PRESETS, type StudioPipelineStep, type StudioStylePreset } from "./studio-workspace-model";
 
 export default function StudioWorkspacePage() {
@@ -187,50 +188,96 @@ export default function StudioWorkspacePage() {
     }
 
     return (
-        <main className="relative flex h-full w-full overflow-hidden bg-[#101113] text-[#f2eee7]">
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:34px_34px]" />
-            <PipelineRail series={series} episode={episode} steps={steps} activeStep={activeStep} onBack={() => router.push("/studio")} onStepChange={setActiveStep} />
-            <section className="relative z-10 flex min-w-0 flex-1 overflow-hidden">
-                {activeStep === "script" ? (
-                    <ScriptProcessorStep
-                        episode={episode}
-                        script={script}
-                        parseError={parseError}
-                        parsing={parsing}
-                        saving={saving}
-                        structureDraft={structureDraft}
-                        savingStructure={savingStructure}
-                        onScriptChange={setScript}
-                        onSaveScript={saveScript}
-                        onParseScript={parseCurrentScript}
-                        onStructureDraftChange={setStructureDraft}
-                        onSaveStructureDraft={saveStructureDraft}
-                    />
-                ) : activeStep === "art_direction" ? (
-                    <ArtDirectionStep
-                        episode={episode}
-                        selectedStyleId={selectedStyleId}
-                        styleName={styleName}
-                        positivePrompt={positivePrompt}
-                        negativePrompt={negativePrompt}
-                        saving={savingArtDirection}
-                        onSelectPreset={applyStylePreset}
-                        onStyleNameChange={setStyleName}
-                        onPositivePromptChange={setPositivePrompt}
-                        onNegativePromptChange={setNegativePrompt}
-                        onSave={saveArtDirection}
-                    />
-                ) : activeStep === "cast" ? (
-                    <CastStep episode={episode} />
-                ) : activeStep === "storyboard_r2v" ? (
-                    <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} />
-                ) : (
-                    <ComingStep step={steps.find((step) => step.id === activeStep)} episode={episode} />
-                )}
-            </section>
-        </main>
+        <ConfigProvider theme={studioAntTheme}>
+            <main className="relative flex h-full w-full overflow-hidden bg-[#0c0b0e] text-[#f2ede4]">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_18%_0%,rgba(52,216,196,0.10),transparent_70%),radial-gradient(55%_45%_at_88%_100%,rgba(255,169,77,0.08),transparent_70%)]" />
+                <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background-image:radial-gradient(rgba(255,255,255,0.42)_0.6px,transparent_0.6px)] [background-size:3px_3px]" />
+                <PipelineRail series={series} episode={episode} steps={steps} activeStep={activeStep} onBack={() => router.push("/studio")} onStepChange={setActiveStep} />
+                <section className="relative z-10 flex min-w-0 flex-1 overflow-hidden">
+                    {activeStep === "script" ? (
+                        <ScriptProcessorStep
+                            episode={episode}
+                            script={script}
+                            parseError={parseError}
+                            parsing={parsing}
+                            saving={saving}
+                            structureDraft={structureDraft}
+                            savingStructure={savingStructure}
+                            onScriptChange={setScript}
+                            onSaveScript={saveScript}
+                            onParseScript={parseCurrentScript}
+                            onStructureDraftChange={setStructureDraft}
+                            onSaveStructureDraft={saveStructureDraft}
+                        />
+                    ) : activeStep === "art_direction" ? (
+                        <ArtDirectionStep
+                            episode={episode}
+                            selectedStyleId={selectedStyleId}
+                            styleName={styleName}
+                            positivePrompt={positivePrompt}
+                            negativePrompt={negativePrompt}
+                            saving={savingArtDirection}
+                            onSelectPreset={applyStylePreset}
+                            onStyleNameChange={setStyleName}
+                            onPositivePromptChange={setPositivePrompt}
+                            onNegativePromptChange={setNegativePrompt}
+                            onSave={saveArtDirection}
+                        />
+                    ) : activeStep === "cast" ? (
+                        <CastStep episode={episode} />
+                    ) : activeStep === "storyboard_r2v" ? (
+                        <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} />
+                    ) : (
+                        <ComingStep step={steps.find((step) => step.id === activeStep)} episode={episode} />
+                    )}
+                </section>
+            </main>
+        </ConfigProvider>
     );
 }
+
+const studioAntTheme = {
+    algorithm: antdTheme.darkAlgorithm,
+    token: {
+        colorBgBase: "#0c0b0e",
+        colorBgContainer: "#181620",
+        colorBgElevated: "#181620",
+        colorBgLayout: "#0c0b0e",
+        colorBorder: "rgba(255,255,255,0.06)",
+        colorBorderSecondary: "rgba(255,255,255,0.035)",
+        colorFillSecondary: "rgba(255,255,255,0.045)",
+        colorPrimary: "#34d8c4",
+        colorPrimaryHover: "#5ee9d6",
+        colorText: "#f2ede4",
+        colorTextSecondary: "#a8a2b0",
+        colorTextTertiary: "#8b8597",
+        borderRadius: 8,
+        fontFamily: "var(--font-sans)",
+    },
+    components: {
+        Button: {
+            defaultBg: "rgba(255,255,255,0.045)",
+            defaultBorderColor: "rgba(255,255,255,0.06)",
+            defaultColor: "#f2ede4",
+            primaryColor: "#0c0b0e",
+            primaryShadow: "0 0 0 1px rgba(52,216,196,0.30), 0 0 24px -6px rgba(52,216,196,0.45)",
+        },
+        Input: {
+            activeBorderColor: "#34d8c4",
+            hoverBorderColor: "rgba(255,255,255,0.14)",
+        },
+        Tag: {
+            defaultBg: "rgba(255,255,255,0.045)",
+            defaultColor: "#a8a2b0",
+        },
+    },
+};
+
+const studioPrimaryButtonClass =
+    "!inline-flex !items-center !justify-center !rounded-full !border-[#34d8c4]/65 !bg-[#34d8c4] !font-semibold !text-[#0c0b0e] !shadow-[inset_0_1.5px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(24,120,110,0.35),0_4px_14px_-2px_rgba(52,216,196,0.45)] hover:!bg-[#5ee9d6] disabled:!opacity-50";
+
+const studioSecondaryButtonClass =
+    "!inline-flex !items-center !justify-center !rounded-full !border-[#34d8c4]/40 !bg-[#34d8c4]/10 !font-semibold !text-[#34d8c4] !shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:!border-[#34d8c4]/60 hover:!bg-[#34d8c4]/20 hover:!text-[#f2ede4] disabled:!opacity-50";
 
 function PipelineRail({
     series,
@@ -248,39 +295,43 @@ function PipelineRail({
     onStepChange: (stepId: StudioPipelineStep["id"]) => void;
 }) {
     return (
-        <aside className="relative z-20 flex h-full w-64 shrink-0 flex-col border-r border-white/10 bg-[#17181b]/95 backdrop-blur-xl">
-            <div className="border-b border-white/10 p-5">
-                <button className="mb-4 inline-flex items-center gap-2 text-xs text-[#a9a39a] transition hover:text-[#f2eee7]" onClick={onBack}>
+        <aside className="relative z-20 flex h-full w-[272px] shrink-0 flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#0a090c]/95 backdrop-blur-xl">
+            <div className="border-b border-[rgba(255,255,255,0.06)] px-5 py-[22px]">
+                <button className="mb-5 inline-flex items-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[0.16em] text-[#8b8597] transition hover:text-[#f2ede4]" onClick={onBack}>
                     <ArrowLeft className="size-3.5" />
                     项目库
                 </button>
-                <p className="text-xs text-[#a9a39a]">LumenX Studio</p>
-                <h1 className="mt-2 line-clamp-2 text-xl font-semibold leading-tight text-[#f2eee7]">{series.title}</h1>
-                <p className="mt-2 text-xs text-[#7f796f]">{episode.title}</p>
+                <p className="font-mono text-[0.59375rem] uppercase tracking-[0.22em] text-[#8b8597]">LumenX Studio</p>
+                <h1 className="mt-2 line-clamp-2 text-[1.55rem] font-semibold leading-[1.08] text-[#f2ede4]">{series.title}</h1>
+                <p className="mt-2 truncate text-[0.8125rem] text-[#a8a2b0]">{episode.title}</p>
             </div>
-            <nav className="flex-1 space-y-2 overflow-y-auto p-4">
+            <nav className="flex-1 space-y-1.5 overflow-y-auto p-3.5">
                 {steps.map((step, index) => (
                     <button
                         key={step.id}
-                        className={`relative flex w-full items-center gap-3 overflow-hidden rounded-lg px-4 py-3 text-left transition ${
-                            activeStep === step.id ? "border border-[#49d2c6]/35 bg-[#49d2c6]/10 text-[#49d2c6]" : "border border-transparent text-[#aaa49c] hover:bg-white/[0.055] hover:text-[#f2eee7]"
-                        } ${step.status === "gated" && activeStep !== step.id ? "opacity-55" : ""}`}
+                        className={cn(
+                            "relative flex w-full items-center gap-3 overflow-hidden rounded-lg border px-3.5 py-3 text-left transition-colors",
+                            activeStep === step.id
+                                ? "border-[#34d8c4]/40 bg-[#34d8c4]/10 text-[#34d8c4] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                                : "border-transparent text-[#a8a2b0] hover:border-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.045)] hover:text-[#f2ede4]",
+                            step.status === "gated" && activeStep !== step.id ? "opacity-55" : "",
+                        )}
                         onClick={() => onStepChange(step.id)}
                     >
-                        {index < steps.length - 1 ? <span className="absolute bottom-[-10px] left-[23px] top-[38px] w-px bg-white/10" /> : null}
-                        <span className="relative grid size-7 shrink-0 place-items-center rounded-full border border-white/10 bg-black/20">{step.icon}</span>
+                        {index < steps.length - 1 ? <span className="absolute bottom-[-10px] left-[26px] top-[39px] w-px bg-[rgba(255,255,255,0.06)]" /> : null}
+                        <span className="relative grid size-7 shrink-0 place-items-center rounded-full border border-[rgba(255,255,255,0.06)] bg-[#181620]">{step.icon}</span>
                         <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium">{step.label}</span>
-                            <span className="mt-0.5 block truncate text-[11px] text-[#7f796f]">{step.statusLabel}</span>
+                            <span className="mt-0.5 block truncate font-mono text-[0.625rem] uppercase tracking-[0.12em] text-[#8b8597]">{step.statusLabel}</span>
                         </span>
                         {activeStep === step.id ? <ChevronRight className="size-4 shrink-0 opacity-70" /> : <StepStateIcon status={step.status} />}
                     </button>
                 ))}
             </nav>
-            <div className="border-t border-white/10 p-4">
-                <div className="rounded-lg border border-white/10 bg-white/[0.045] p-3">
-                    <p className="text-xs text-[#7f796f]">当前模型</p>
-                    <p className="mt-1 truncate text-sm text-[#f2eee7]">{series.modelPreferences.textModel || "跟随全局配置"}</p>
+            <div className="border-t border-[rgba(255,255,255,0.06)] p-4">
+                <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-3">
+                    <p className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-[#8b8597]">当前模型</p>
+                    <p className="mt-1 truncate text-sm text-[#f2ede4]">{series.modelPreferences.textModel || "跟随全局配置"}</p>
                 </div>
             </div>
         </aside>
@@ -288,9 +339,9 @@ function PipelineRail({
 }
 
 function StepStateIcon({ status }: { status: StudioPipelineStep["status"] }) {
-    if (status === "ready") return <Check className="size-4 shrink-0 text-[#49d2c6]" />;
-    if (status === "gated") return <Lock className="size-3.5 shrink-0 text-[#7f796f]" />;
-    return <span className="size-2 shrink-0 rounded-full border border-[#7f796f]" />;
+    if (status === "ready") return <Check className="size-4 shrink-0 text-[#34d8c4]" />;
+    if (status === "gated") return <Lock className="size-3.5 shrink-0 text-[#8b8597]" />;
+    return <span className="size-2 shrink-0 rounded-full border border-[#8b8597]" />;
 }
 
 function ScriptProcessorStep({
@@ -336,16 +387,16 @@ function ScriptProcessorStep({
                     }
                     trailing={
                         <>
-                            <Button icon={<Save className="size-4" />} loading={saving} onClick={onSaveScript}>
+                            <Button className={studioSecondaryButtonClass} icon={<Save className="size-4" />} loading={saving} onClick={onSaveScript}>
                                 保存
                             </Button>
-                            <Button type="primary" icon={<WandSparkles className="size-4" />} loading={parsing} onClick={onParseScript}>
+                            <Button className={studioPrimaryButtonClass} type="primary" icon={<WandSparkles className="size-4" />} loading={parsing} onClick={onParseScript}>
                                 提取实体
                             </Button>
                         </>
                     }
                 />
-                <div className="min-h-0 flex-1 overflow-hidden bg-[#141517] p-6">
+                <div className="min-h-0 flex-1 overflow-hidden bg-[#131116] p-6">
                     {parseError ? <Alert className="mb-4" showIcon type="warning" title="剧本解析没有写入结果" description={parseError} /> : null}
                     <Input.TextArea
                         className="!h-full !resize-none !border-0 !bg-transparent !p-0 !font-mono !text-base !leading-8 !text-[#d8d0c4] shadow-none focus:!shadow-none"
@@ -356,20 +407,20 @@ function ScriptProcessorStep({
                     />
                 </div>
             </section>
-            <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-white/10 bg-[#1b1b1f]/95">
+            <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-[rgba(255,255,255,0.06)] bg-[#181620]/95">
                 <SidePanelHeader title="结构草稿" subtitle="实体识别结果与可编辑 JSON" trailing={<Tag color="default">{episode.characters.length + episode.scenes.length + episode.props.length}</Tag>} />
                 <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
                     <EntityList title="角色" items={episode.characters} emptyText="提取后会出现角色草稿。" />
                     <EntityList title="场景" items={episode.scenes} emptyText="提取后会出现主要场景。" />
                     <EntityList title="道具" items={episode.props} emptyText="提取后会出现关键道具。" />
                     <ShotList shots={episode.shots} />
-                    <section className="space-y-3 border-t border-white/10 pt-4">
+                    <section className="space-y-3 border-t border-[rgba(255,255,255,0.06)] pt-4">
                         <div className="flex items-center justify-between gap-3">
                             <div>
-                                <h3 className="text-sm font-semibold text-[#f2eee7]">JSON 草稿</h3>
-                                <p className="mt-1 text-xs text-[#8d867c]">保存后写回当前 Episode。</p>
+                                <h3 className="text-sm font-semibold text-[#f2ede4]">JSON 草稿</h3>
+                                <p className="mt-1 text-xs text-[#8b8597]">保存后写回当前 Episode。</p>
                             </div>
-                            <Button size="small" loading={savingStructure} onClick={onSaveStructureDraft}>
+                            <Button className={studioSecondaryButtonClass} size="small" loading={savingStructure} onClick={onSaveStructureDraft}>
                                 保存
                             </Button>
                         </div>
@@ -433,14 +484,14 @@ function ArtDirectionStep({
                     </>
                 }
             />
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[#141517] p-7">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[#131116] p-7">
                 <section className="mb-7">
                     <div className="mb-4 flex items-center justify-between gap-3">
-                        <h3 className="flex items-center gap-2 text-lg font-semibold text-[#f2eee7]">
-                            <Sparkles className="size-5 text-[#f0b45a]" />
+                        <h3 className="flex items-center gap-2 text-lg font-semibold text-[#f2ede4]">
+                            <Sparkles className="size-5 text-[#ffa94d]" />
                             推荐风格
                         </h3>
-                        <Button icon={<WandSparkles className="size-4" />} onClick={() => onSelectPreset(recommendations[0])}>
+                        <Button className={studioSecondaryButtonClass} icon={<WandSparkles className="size-4" />} onClick={() => onSelectPreset(recommendations[0])}>
                             根据当前剧本推荐
                         </Button>
                     </div>
@@ -452,8 +503,8 @@ function ArtDirectionStep({
                 </section>
 
                 <section className="mb-7">
-                    <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-[#f2eee7]">
-                        <Palette className="size-5 text-[#49d2c6]" />
+                    <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-[#f2ede4]">
+                        <Palette className="size-5 text-[#34d8c4]" />
                         内置预设
                     </h3>
                     <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -461,7 +512,7 @@ function ArtDirectionStep({
                             <button
                                 key={category.id}
                                 className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                                    activeCategory === category.id ? "border-[#49d2c6]/40 bg-[#49d2c6]/15 text-[#49d2c6]" : "border-transparent bg-white/[0.055] text-[#aaa49c] hover:text-[#f2eee7]"
+                                    activeCategory === category.id ? "border-[#34d8c4]/40 bg-[#34d8c4]/15 text-[#34d8c4]" : "border-transparent bg-[rgba(255,255,255,0.06)] text-[#a8a2b0] hover:text-[#f2ede4]"
                                 }`}
                                 onClick={() => setActiveCategory(category.id)}
                             >
@@ -476,9 +527,9 @@ function ArtDirectionStep({
                     </div>
                 </section>
             </div>
-            <div className="grid shrink-0 grid-cols-1 gap-4 border-t border-white/10 bg-[#18191c]/95 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,480px)]">
+            <div className="grid shrink-0 grid-cols-1 gap-4 border-t border-[rgba(255,255,255,0.06)] bg-[#131116]/95 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(340px,480px)]">
                 <div className="min-w-0">
-                    <div className="mb-2 flex items-center gap-2 text-xs uppercase text-[#8d867c]">
+                    <div className="mb-2 flex items-center gap-2 text-xs uppercase text-[#8b8597]">
                         <Pencil className="size-3.5" />
                         Prompt Editor
                     </div>
@@ -488,13 +539,13 @@ function ArtDirectionStep({
                         <Input.TextArea value={negativePrompt} autoSize={{ minRows: 4, maxRows: 6 }} onChange={(event) => onNegativePromptChange(event.target.value)} placeholder="负向提示词" />
                     </div>
                 </div>
-                <div className="flex min-w-0 flex-col justify-between rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                <div className="flex min-w-0 flex-col justify-between rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4">
                     <div>
-                        <p className="text-xs text-[#8d867c]">当前选择</p>
-                        <h3 className="mt-2 text-xl font-semibold text-[#f2eee7]">{styleName || selectedPreset.name}</h3>
-                        <p className="mt-2 text-sm leading-6 text-[#aaa49c]">{selectedPreset.subtitle}</p>
+                        <p className="text-xs text-[#8b8597]">当前选择</p>
+                        <h3 className="mt-2 text-xl font-semibold text-[#f2ede4]">{styleName || selectedPreset.name}</h3>
+                        <p className="mt-2 text-sm leading-6 text-[#a8a2b0]">{selectedPreset.subtitle}</p>
                     </div>
-                    <Button type="primary" size="large" icon={<ChevronRight className="size-4" />} loading={saving} disabled={!positivePrompt.trim()} onClick={onSave}>
+                    <Button className={studioPrimaryButtonClass} type="primary" size="large" icon={<ChevronRight className="size-4" />} loading={saving} disabled={!positivePrompt.trim()} onClick={onSave}>
                         应用并继续
                     </Button>
                 </div>
@@ -507,12 +558,12 @@ function StylePresetCard({ preset, selected, tone, onSelect }: { preset: StudioS
     return (
         <button
             className={`group overflow-hidden rounded-lg border text-left transition ${
-                selected ? "border-[#49d2c6]/70 bg-[#49d2c6]/10 shadow-[0_0_0_1px_rgba(73,210,198,0.18)]" : "border-white/10 bg-white/[0.04] hover:border-white/25 hover:bg-white/[0.065]"
+                selected ? "border-[#34d8c4]/70 bg-[#34d8c4]/10 shadow-[0_0_0_1px_rgba(52,216,196,0.18)]" : "border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] hover:border-[rgba(255,255,255,0.16)] hover:bg-[rgba(255,255,255,0.075)]"
             }`}
             onClick={onSelect}
         >
             <div className="aspect-[4/2] p-3">
-                <div className="flex h-full overflow-hidden rounded-md border border-white/10">
+                <div className="flex h-full overflow-hidden rounded-md border border-[rgba(255,255,255,0.06)]">
                     {preset.swatches.map((color) => (
                         <span key={color} className="flex-1" style={{ backgroundColor: color }} />
                     ))}
@@ -520,11 +571,11 @@ function StylePresetCard({ preset, selected, tone, onSelect }: { preset: StudioS
             </div>
             <div className="px-4 pb-4">
                 <div className="flex items-center gap-2">
-                    {tone ? <span className="rounded-md border border-[#f0b45a]/25 bg-[#f0b45a]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#f0b45a]">AI</span> : null}
-                    <h4 className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f2eee7]">{preset.name}</h4>
-                    {selected ? <Check className="size-4 shrink-0 text-[#49d2c6]" /> : null}
+                    {tone ? <span className="rounded-md border border-[#ffa94d]/25 bg-[#ffa94d]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#ffa94d]">AI</span> : null}
+                    <h4 className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f2ede4]">{preset.name}</h4>
+                    {selected ? <Check className="size-4 shrink-0 text-[#34d8c4]" /> : null}
                 </div>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8d867c]">{preset.subtitle}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8b8597]">{preset.subtitle}</p>
             </div>
         </button>
     );
@@ -551,12 +602,12 @@ function CastStep({ episode }: { episode: StudioEpisode }) {
                     </>
                 }
                 trailing={
-                    <Button icon={<Plus className="size-4" />} disabled>
+                    <Button className={studioSecondaryButtonClass} icon={<Plus className="size-4" />} disabled>
                         新增素材
                     </Button>
                 }
             />
-            <div className="border-b border-white/10 bg-[#18191c] px-6 pt-3">
+            <div className="border-b border-[rgba(255,255,255,0.06)] bg-[#131116] px-6 pt-3">
                 {[
                     { id: "all" as const, label: "全部", icon: <Layers className="size-3.5" />, count: total },
                     { id: "character" as const, label: "角色", icon: <Users className="size-3.5" />, count: sections[0].items.length },
@@ -565,24 +616,24 @@ function CastStep({ episode }: { episode: StudioEpisode }) {
                 ].map((tab) => (
                     <button
                         key={tab.id}
-                        className={`relative mr-5 inline-flex items-center gap-1.5 pb-3 text-xs uppercase transition ${activeKind === tab.id ? "text-[#f2eee7]" : "text-[#8d867c] hover:text-[#f2eee7]"}`}
+                        className={`relative mr-5 inline-flex items-center gap-1.5 pb-3 text-xs uppercase transition ${activeKind === tab.id ? "text-[#f2ede4]" : "text-[#8b8597] hover:text-[#f2ede4]"}`}
                         onClick={() => setActiveKind(tab.id)}
                     >
                         {tab.icon}
                         {tab.label}
-                        <span className="text-[#49d2c6]">{tab.count}</span>
-                        {activeKind === tab.id ? <span className="absolute inset-x-0 bottom-0 h-px bg-[#49d2c6]" /> : null}
+                        <span className="text-[#34d8c4]">{tab.count}</span>
+                        {activeKind === tab.id ? <span className="absolute inset-x-0 bottom-0 h-px bg-[#34d8c4]" /> : null}
                     </button>
                 ))}
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[#141517] p-7">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[#131116] p-7">
                 {total === 0 ? (
                     <EmptyStudioPanel icon={<Sparkles className="size-7" />} title="还没有本集素材" body="先在 Script 步骤提取角色、场景、道具，Cast 会自动汇总成本集资产清单。" />
                 ) : (
                     <div className="space-y-8">
                         {visibleSections.map((section) => (
                             <section key={section.id}>
-                                <h3 className="mb-4 text-lg font-semibold text-[#f2eee7]">{section.title}</h3>
+                                <h3 className="mb-4 text-lg font-semibold text-[#f2ede4]">{section.title}</h3>
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                                     {section.items.map((item) => (
                                         <CastAssetCard key={item.id} item={item} />
@@ -599,18 +650,18 @@ function CastStep({ episode }: { episode: StudioEpisode }) {
 
 function CastAssetCard({ item }: { item: ReturnType<typeof buildCastSections>[number]["items"][number] }) {
     return (
-        <article className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
-            <div className="mb-4 flex aspect-[16/9] items-center justify-center rounded-md border border-dashed border-white/15 bg-black/20 text-[#7f796f]">
+        <article className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4">
+            <div className="mb-4 flex aspect-[16/9] items-center justify-center rounded-md border border-dashed border-[rgba(255,255,255,0.10)] bg-black/20 text-[#8b8597]">
                 <Image className="size-7" />
             </div>
             <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                    <h4 className="truncate text-base font-semibold text-[#f2eee7]">{item.name}</h4>
-                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8d867c]">{item.description || "暂无描述"}</p>
+                    <h4 className="truncate text-base font-semibold text-[#f2ede4]">{item.name}</h4>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8b8597]">{item.description || "暂无描述"}</p>
                 </div>
                 <Tag color={item.status === "ready" ? "success" : "warning"}>{item.status === "ready" ? "ready" : "pending"}</Tag>
             </div>
-            <p className="mt-3 text-xs text-[#7f796f]">出现次数：{item.appearances}</p>
+            <p className="mt-3 text-xs text-[#8b8597]">出现次数：{item.appearances}</p>
         </article>
     );
 }
@@ -633,28 +684,28 @@ function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; o
                     </>
                 }
                 trailing={
-                    <Button type="primary" icon={<WandSparkles className="size-4" />} disabled={!canGenerate}>
+                    <Button className={studioPrimaryButtonClass} type="primary" icon={<WandSparkles className="size-4" />} disabled={!canGenerate}>
                         从剧本生成分镜
                     </Button>
                 }
             />
-            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-[#141517] xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-[#131116] xl:grid-cols-[minmax(0,1fr)_360px]">
                 <div className="min-h-0 overflow-y-auto p-7">
                     {cards.length === 0 ? (
                         <EmptyStudioPanel icon={<Clapperboard className="size-7" />} title="还没有分镜" body="Script 步骤提取后会生成第一版分镜草稿；这里会继续承接图像候选和 R2V 生成。" />
                     ) : (
                         <div className="space-y-4">
                             {cards.map((card) => (
-                                <article key={card.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                                <article key={card.id} className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4">
                                     <div className="flex items-start gap-4">
-                                        <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#49d2c6]/25 bg-[#49d2c6]/10 text-sm font-semibold text-[#49d2c6]">{String(card.order).padStart(2, "0")}</div>
+                                        <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#34d8c4]/25 bg-[#34d8c4]/10 text-sm font-semibold text-[#34d8c4]">{String(card.order).padStart(2, "0")}</div>
                                         <div className="min-w-0 flex-1">
                                             <div className="mb-2 flex items-center gap-2">
-                                                <h3 className="text-base font-semibold text-[#f2eee7]">{card.title}</h3>
+                                                <h3 className="text-base font-semibold text-[#f2ede4]">{card.title}</h3>
                                                 {card.hasDialogue ? <Tag color="blue">对白</Tag> : null}
                                                 <Tag color="default">候选 {card.candidateCount}</Tag>
                                             </div>
-                                            <p className="whitespace-pre-wrap text-sm leading-7 text-[#aaa49c]">{card.prompt}</p>
+                                            <p className="whitespace-pre-wrap text-sm leading-7 text-[#a8a2b0]">{card.prompt}</p>
                                         </div>
                                     </div>
                                 </article>
@@ -662,14 +713,14 @@ function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; o
                         </div>
                     )}
                 </div>
-                <aside className="flex h-full flex-col border-t border-white/10 bg-[#1b1b1f]/95 xl:border-l xl:border-t-0">
-                    <SidePanelHeader title="生成前检查" subtitle="对应 LumenX StoryboardGenerateDialog" trailing={<Film className="size-4 text-[#49d2c6]" />} />
+                <aside className="flex h-full flex-col border-t border-[rgba(255,255,255,0.06)] bg-[#181620]/95 xl:border-l xl:border-t-0">
+                    <SidePanelHeader title="生成前检查" subtitle="对应 LumenX StoryboardGenerateDialog" trailing={<Film className="size-4 text-[#34d8c4]" />} />
                     <div className="space-y-3 p-4">
                         <PreflightRow passed={episode.script.trim().length >= 40} title="剧本文本足够长" hint="建议先在 Script 中保存完整剧本。" />
                         <PreflightRow passed={episode.characters.length > 0} title="已有角色清单" hint="先提取或手动保存 characters。" />
                         <PreflightRow passed={cards.length > 0} title="已有分镜草稿" hint="解析剧本后会写入 shotDrafts。" />
                         {!canGenerate ? (
-                            <Button block onClick={onJumpToScript}>
+                            <Button className={studioSecondaryButtonClass} block onClick={onJumpToScript}>
                                 回到 Script 修正
                             </Button>
                         ) : null}
@@ -682,12 +733,12 @@ function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; o
 
 function PreflightRow({ passed, title, hint }: { passed: boolean; title: string; hint: string }) {
     return (
-        <div className={`rounded-lg border px-3 py-2 ${passed ? "border-[#49d2c6]/25 bg-[#49d2c6]/10" : "border-[#f0b45a]/30 bg-[#f0b45a]/10"}`}>
-            <div className="flex items-center gap-2 text-sm text-[#f2eee7]">
-                <span className={`grid size-5 place-items-center rounded-full text-xs ${passed ? "bg-[#49d2c6]/20 text-[#49d2c6]" : "bg-[#f0b45a]/20 text-[#f0b45a]"}`}>{passed ? "✓" : "!"}</span>
+        <div className={cn("rounded-lg border px-3 py-2", passed ? "border-[#34d8c4]/25 bg-[#34d8c4]/10" : "border-[#ffa94d]/30 bg-[#ffa94d]/10")}>
+            <div className="flex items-center gap-2 text-sm text-[#f2ede4]">
+                <span className={cn("grid size-5 place-items-center rounded-full text-xs", passed ? "bg-[#34d8c4]/20 text-[#34d8c4]" : "bg-[#ffa94d]/20 text-[#ffa94d]")}>{passed ? "✓" : "!"}</span>
                 {title}
             </div>
-            {!passed ? <p className="mt-1 pl-7 text-xs text-[#8d867c]">{hint}</p> : null}
+            {!passed ? <p className="mt-1 pl-7 text-xs text-[#8b8597]">{hint}</p> : null}
         </div>
     );
 }
@@ -696,9 +747,9 @@ function EmptyStudioPanel({ icon, title, body }: { icon: ReactNode; title: strin
     return (
         <div className="flex h-full items-center justify-center text-center">
             <div className="max-w-md">
-                <div className="mx-auto mb-4 grid size-16 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-[#8d867c]">{icon}</div>
-                <h3 className="text-xl font-semibold text-[#f2eee7]">{title}</h3>
-                <p className="mt-2 text-sm leading-7 text-[#8d867c]">{body}</p>
+                <div className="mx-auto mb-4 grid size-16 place-items-center rounded-full border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] text-[#8b8597] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">{icon}</div>
+                <h3 className="text-xl font-semibold text-[#f2ede4]">{title}</h3>
+                <p className="mt-2 text-sm leading-7 text-[#8b8597]">{body}</p>
             </div>
         </div>
     );
@@ -706,19 +757,19 @@ function EmptyStudioPanel({ icon, title, body }: { icon: ReactNode; title: strin
 
 function StepPageHeader({ stepNumber, englishName, title, subtitle, pills, trailing }: { stepNumber: number; englishName: string; title: string; subtitle: string; pills?: ReactNode; trailing?: ReactNode }) {
     return (
-        <header className="shrink-0 border-b border-white/10 bg-[#18191c]/90 px-7 py-5">
+        <header className="shrink-0 border-b border-[rgba(255,255,255,0.035)] bg-[#131116]/95 px-7 pb-4 pt-[22px]">
             <div className="flex items-start gap-5">
                 <div className="min-w-0 flex-1">
-                    <p className="text-[11px] uppercase text-[#8d867c]">
-                        STEP <span className="font-medium text-[#49d2c6]">{String(stepNumber).padStart(2, "0")}</span> · {englishName}
+                    <p className="font-mono text-[0.59375rem] uppercase tracking-[0.22em] text-[#8b8597]">
+                        STEP <span className="ml-1.5 font-medium text-[#34d8c4]">{String(stepNumber).padStart(2, "0")}</span> <span className="mx-1.5">·</span> {englishName}
                     </p>
-                    <div className="mt-2 flex flex-wrap items-baseline gap-3">
-                        <h2 className="text-3xl font-semibold leading-tight text-[#f2eee7]">{title}</h2>
+                    <div className="mt-1.5 flex flex-wrap items-baseline gap-3.5">
+                        <h2 className="text-[2.125rem] font-semibold leading-[1.05] tracking-normal text-[#f2ede4]">{title}</h2>
                         {pills ? <div className="flex flex-wrap items-center gap-2">{pills}</div> : null}
                     </div>
-                    <p className="mt-2 text-sm text-[#aaa49c]">{subtitle}</p>
+                    <p className="mt-1.5 text-[0.8125rem] text-[#a8a2b0]">{subtitle}</p>
                 </div>
-                {trailing ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{trailing}</div> : null}
+                {trailing ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1">{trailing}</div> : null}
             </div>
         </header>
     );
@@ -726,22 +777,22 @@ function StepPageHeader({ stepNumber, englishName, title, subtitle, pills, trail
 
 function StepPill({ label, value }: { label: string; value: ReactNode }) {
     return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-xs text-[#aaa49c]">
-            {label}
-            <span className="text-[#49d2c6]">{value}</span>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(255,255,255,0.06)] bg-[#0a090c] px-2.5 py-1 font-mono text-[0.59375rem] text-[#a8a2b0]">
+            <span className="text-[#8b8597]">{label}</span>
+            <span className="text-[#34d8c4]">{value}</span>
         </span>
     );
 }
 
 function SidePanelHeader({ title, subtitle, trailing }: { title: string; subtitle?: string; trailing?: ReactNode }) {
     return (
-        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#18191c] px-4">
-            <div className="grid size-7 shrink-0 place-items-center rounded-full border border-[#49d2c6]/30 bg-[#49d2c6]/10 text-[#49d2c6]">
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[rgba(255,255,255,0.06)] bg-[#131116] px-4">
+            <div className="grid size-7 shrink-0 place-items-center rounded-full border border-[#34d8c4]/30 bg-[#34d8c4]/10 text-[#34d8c4]">
                 <WandSparkles className="size-3.5" />
             </div>
             <div className="min-w-0 flex-1">
-                <h3 className="truncate text-sm font-medium text-[#f2eee7]">{title}</h3>
-                {subtitle ? <p className="truncate text-xs text-[#8d867c]">{subtitle}</p> : null}
+                <h3 className="truncate text-sm font-medium text-[#f2ede4]">{title}</h3>
+                {subtitle ? <p className="truncate text-xs text-[#8b8597]">{subtitle}</p> : null}
             </div>
             {trailing}
         </div>
@@ -750,8 +801,8 @@ function SidePanelHeader({ title, subtitle, trailing }: { title: string; subtitl
 
 function EntityList({ title, items, emptyText }: { title: string; items: Array<{ id: string; name: string; description: string }>; emptyText: string }) {
     return (
-        <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#f2eee7]">
+        <section className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.035)] p-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#f2ede4]">
                 {title}
                 <Tag className="ml-auto" color="default">
                     {items.length}
@@ -762,8 +813,8 @@ function EntityList({ title, items, emptyText }: { title: string; items: Array<{
                 dataSource={items}
                 locale={{ emptyText }}
                 renderItem={(item) => (
-                    <List.Item className="!border-white/10 !px-0">
-                        <List.Item.Meta title={<span className="text-[#f2eee7]">{item.name}</span>} description={<span className="text-[#9c9489]">{item.description || "暂无描述"}</span>} />
+                    <List.Item className="!border-[rgba(255,255,255,0.06)] !px-0">
+                        <List.Item.Meta title={<span className="text-[#f2ede4]">{item.name}</span>} description={<span className="text-[#a8a2b0]">{item.description || "暂无描述"}</span>} />
                     </List.Item>
                 )}
             />
@@ -773,8 +824,8 @@ function EntityList({ title, items, emptyText }: { title: string; items: Array<{
 
 function ShotList({ shots }: { shots: StudioEpisode["shots"] }) {
     return (
-        <section className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#f2eee7]">
+        <section className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.035)] p-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#f2ede4]">
                 分镜草稿
                 <Tag className="ml-auto" color="default">
                     {shots.length}
@@ -785,10 +836,10 @@ function ShotList({ shots }: { shots: StudioEpisode["shots"] }) {
                 dataSource={shots}
                 locale={{ emptyText: "提取后会出现按顺序排列的分镜草稿。" }}
                 renderItem={(shot) => (
-                    <List.Item className="!border-white/10 !px-0">
+                    <List.Item className="!border-[rgba(255,255,255,0.06)] !px-0">
                         <List.Item.Meta
-                            title={<span className="text-[#f2eee7]">{`${shot.order}. ${shot.title}`}</span>}
-                            description={<span className="text-[#9c9489]">{shot.dialogue ? `${shot.description} 对白：${shot.dialogue}` : shot.description}</span>}
+                            title={<span className="text-[#f2ede4]">{`${shot.order}. ${shot.title}`}</span>}
+                            description={<span className="text-[#a8a2b0]">{shot.dialogue ? `${shot.description} 对白：${shot.dialogue}` : shot.description}</span>}
                         />
                     </List.Item>
                 )}
@@ -807,11 +858,11 @@ function ComingStep({ step, episode }: { step?: StudioPipelineStep; episode: Stu
                 subtitle="Issue 5 先固定 LumenX pipeline 空间结构，后续切片会逐步接入该步骤的真实组件。"
                 pills={<StepPill label="镜头" value={episode.shots.length} />}
             />
-            <div className="flex flex-1 items-center justify-center bg-[#141517] p-8">
-                <div className="w-full max-w-xl rounded-lg border border-white/10 bg-white/[0.04] p-6 text-center">
-                    <p className="text-sm text-[#aaa49c]">该步骤已占位在 LumenX 统一 R2V 工作台中。</p>
-                    <h2 className="mt-3 text-2xl font-semibold text-[#f2eee7]">{step?.label}</h2>
-                    <p className="mt-3 text-sm leading-7 text-[#8d867c]">下一轮会按 Issue 5 顺序继续迁移 Art Direction、Cast 和 StoryboardR2V 轻量版。</p>
+            <div className="flex flex-1 items-center justify-center bg-[#131116] p-8">
+                <div className="w-full max-w-xl rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-6 text-center">
+                    <p className="text-sm text-[#a8a2b0]">该步骤已占位在 LumenX 统一 R2V 工作台中。</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-[#f2ede4]">{step?.label}</h2>
+                    <p className="mt-3 text-sm leading-7 text-[#8b8597]">下一轮会按 Issue 5 顺序继续迁移 Art Direction、Cast 和 StoryboardR2V 轻量版。</p>
                 </div>
             </div>
         </section>
