@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createInMemoryStudioStorage, createStudioRepository } from "@/services/studio-local";
-import { generateCastReferences, normalizeScriptStructure, parseAndApplyScript, parseScript, selectCastAssetReference, StudioGenerationError, updateCastEntityPrompt } from "@/services/api/studio-generation";
+import {
+    addCastAssetReference,
+    generateCastReferences,
+    normalizeScriptStructure,
+    parseAndApplyScript,
+    parseScript,
+    removeCastCandidateReference,
+    selectCastAssetReference,
+    StudioGenerationError,
+    updateCastEntityPrompt,
+} from "@/services/api/studio-generation";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const config: AiConfig = {
@@ -453,6 +463,184 @@ describe("studio generation adapter", () => {
             { assetId: "asset-old", kind: "image", role: "candidate" },
             { assetId: "asset-external", kind: "image", role: "selected" },
         ]);
+    });
+
+    it("removes a Cast candidate relationship without touching selected refs or snapshots", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            characters: [
+                {
+                    id: "char-1",
+                    name: "阿岚",
+                    description: "夜班店员",
+                    prompt: "阿岚角色参考图",
+                    assetRefs: [
+                        { assetId: "asset-selected", kind: "image", role: "selected" },
+                        { assetId: "asset-remove", kind: "image", role: "candidate", metadata: { source: "studio-cast" } },
+                        { assetId: "asset-keep", kind: "image", role: "candidate" },
+                    ],
+                    generation: { image: { status: "completed", lastEffectivePrompt: "保留生成快照" } },
+                },
+            ],
+        });
+
+        const result = await removeCastCandidateReference({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            kind: "character",
+            entityId: "char-1",
+            assetId: "asset-remove",
+        });
+
+        expect(result.episode.characters[0]).toMatchObject({
+            assetRefs: [
+                { assetId: "asset-selected", kind: "image", role: "selected" },
+                { assetId: "asset-keep", kind: "image", role: "candidate" },
+            ],
+            prompt: "阿岚角色参考图",
+            generation: { image: { status: "completed", lastEffectivePrompt: "保留生成快照" } },
+        });
+    });
+
+    it("does not remove selected Cast refs through the candidate removal operation", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            scenes: [
+                {
+                    id: "scene-1",
+                    name: "便利店",
+                    description: "雨夜街角",
+                    prompt: "雨夜街角便利店",
+                    assetRefs: [
+                        { assetId: "asset-selected", kind: "image", role: "selected" },
+                        { assetId: "asset-candidate", kind: "image", role: "candidate" },
+                    ],
+                },
+            ],
+        });
+
+        await expect(
+            removeCastCandidateReference({
+                repository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind: "scene",
+                entityId: "scene-1",
+                assetId: "asset-selected",
+            }),
+        ).rejects.toThrow("只能移除 candidate 参考图");
+
+        await expect(repository.getSeries(series.id)).resolves.toMatchObject({
+            episodes: [
+                expect.objectContaining({
+                    scenes: [
+                        expect.objectContaining({
+                            assetRefs: [
+                                { assetId: "asset-selected", kind: "image", role: "selected" },
+                                { assetId: "asset-candidate", kind: "image", role: "candidate" },
+                            ],
+                        }),
+                    ],
+                }),
+            ],
+        });
+    });
+
+    it("adds an image asset from the library as a Cast candidate with source metadata", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            props: [{ id: "prop-1", name: "贝壳", description: "会发光", prompt: "发光贝壳道具", assetRefs: [] }],
+        });
+
+        const result = await addCastAssetReference({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            kind: "prop",
+            entityId: "prop-1",
+            asset: { id: "asset-library-image", kind: "image" },
+            role: "candidate",
+            now: () => "2026-07-03T12:00:00.000Z",
+        });
+
+        expect(result.episode.props[0].assetRefs).toEqual([
+            {
+                assetId: "asset-library-image",
+                kind: "image",
+                role: "candidate",
+                note: "从素材库加入 Cast 参考池",
+                metadata: {
+                    source: "asset-library",
+                    entityKind: "prop",
+                    entityId: "prop-1",
+                    createdAt: "2026-07-03T12:00:00.000Z",
+                },
+            },
+        ]);
+    });
+
+    it("selects a library image while demoting the previous selected ref and deduping repeats", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            characters: [
+                {
+                    id: "char-1",
+                    name: "阿岚",
+                    description: "夜班店员",
+                    prompt: "阿岚角色参考图",
+                    assetRefs: [
+                        { assetId: "asset-old", kind: "image", role: "selected" },
+                        { assetId: "asset-library-image", kind: "image", role: "candidate", metadata: { source: "asset-library", createdAt: "old" } },
+                    ],
+                },
+            ],
+        });
+
+        const result = await addCastAssetReference({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            kind: "character",
+            entityId: "char-1",
+            asset: { id: "asset-library-image", kind: "image" },
+            role: "selected",
+            now: () => "2026-07-03T12:05:00.000Z",
+        });
+
+        expect(result.episode.characters[0].assetRefs).toEqual([
+            { assetId: "asset-old", kind: "image", role: "candidate" },
+            { assetId: "asset-library-image", kind: "image", role: "selected", metadata: { source: "asset-library", createdAt: "old" } },
+        ]);
+    });
+
+    it("rejects non-image assets when attaching library assets to Cast", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            scenes: [{ id: "scene-1", name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店", assetRefs: [] }],
+        });
+
+        await expect(
+            addCastAssetReference({
+                repository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind: "scene",
+                entityId: "scene-1",
+                asset: { id: "asset-video", kind: "video" },
+                role: "candidate",
+            }),
+        ).rejects.toThrow("只能加入图片素材");
     });
 
     it("saves edited Cast entity prompts through the repository boundary", async () => {

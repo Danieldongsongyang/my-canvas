@@ -96,6 +96,14 @@ export type SelectCastAssetReferenceInput = {
     assetId: string;
 };
 
+export type RemoveCastCandidateReferenceInput = SelectCastAssetReferenceInput;
+
+export type AddCastAssetReferenceInput = Omit<SelectCastAssetReferenceInput, "assetId"> & {
+    asset: Pick<Asset, "id" | "kind">;
+    role?: "candidate" | "selected";
+    now?: () => string;
+};
+
 export type UpdateCastEntityPromptInput = {
     repository: StudioRepository;
     seriesId: string;
@@ -345,6 +353,45 @@ export async function selectCastAssetReference(input: SelectCastAssetReferenceIn
     return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, updatedEntity));
 }
 
+export async function removeCastCandidateReference(input: RemoveCastCandidateReferenceInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const entity = getCastEntity(episode, input.kind, input.entityId);
+    if (!entity) throw new StudioGenerationError("Cast 素材不存在。");
+
+    const targetRef = entity.assetRefs.find((ref) => ref.kind === "image" && ref.assetId === input.assetId);
+    if (!targetRef) return { series, episode };
+    if (targetRef.role !== "candidate") throw new StudioGenerationError("只能移除 candidate 参考图。");
+
+    const updatedEntity = {
+        ...entity,
+        assetRefs: entity.assetRefs.filter((ref) => !(ref.kind === "image" && ref.assetId === input.assetId && ref.role === "candidate")),
+    };
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, updatedEntity));
+}
+
+export async function addCastAssetReference(input: AddCastAssetReferenceInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    if (input.asset.kind !== "image") throw new StudioGenerationError("只能加入图片素材。");
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const entity = getCastEntity(episode, input.kind, input.entityId);
+    if (!entity) throw new StudioGenerationError("Cast 素材不存在。");
+
+    const role = input.role ?? "candidate";
+    const now = input.now ?? (() => new Date().toISOString());
+    const assetRefs = upsertLibraryImageAssetRef(entity.assetRefs, {
+        assetId: input.asset.id,
+        role,
+        kind: input.kind,
+        entityId: input.entityId,
+        createdAt: now(),
+    });
+    const updatedEntity = { ...entity, assetRefs };
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, updatedEntity));
+}
+
 export async function updateCastEntityPrompt(input: UpdateCastEntityPromptInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
     const prompt = input.prompt.trim();
     if (!prompt) throw new StudioGenerationError("Cast prompt 不能为空。");
@@ -556,6 +603,52 @@ function selectImageAssetRef(refs: StudioAssetRef[], assetId: string) {
         deduped.map((ref) => {
             if (ref.kind !== "image") return ref;
             if (ref.assetId === assetId) return { ...ref, role: "selected" as const };
+            if (ref.role === "selected") return { ...ref, role: "candidate" as const };
+            return ref;
+        }),
+    );
+}
+
+function upsertLibraryImageAssetRef(
+    refs: StudioAssetRef[],
+    input: {
+        assetId: string;
+        role: "candidate" | "selected";
+        kind: StudioCastTargetKind;
+        entityId: string;
+        createdAt: string;
+    },
+) {
+    const deduped: StudioAssetRef[] = [];
+    for (const ref of refs) {
+        if (ref.kind === "image" && deduped.some((item) => item.kind === "image" && item.assetId === ref.assetId)) continue;
+        deduped.push(ref);
+    }
+
+    const hasExisting = deduped.some((ref) => ref.kind === "image" && ref.assetId === input.assetId);
+    const nextRefs = hasExisting
+        ? deduped
+        : [
+              ...deduped,
+              {
+                  assetId: input.assetId,
+                  kind: "image" as const,
+                  role: "candidate" as const,
+                  note: "从素材库加入 Cast 参考池",
+                  metadata: {
+                      source: "asset-library",
+                      entityKind: input.kind,
+                      entityId: input.entityId,
+                      createdAt: input.createdAt,
+                  },
+              },
+          ];
+
+    if (input.role === "candidate") return normalizeSingleSelectedImageRef(nextRefs);
+    return normalizeSingleSelectedImageRef(
+        nextRefs.map((ref) => {
+            if (ref.kind !== "image") return ref;
+            if (ref.assetId === input.assetId) return { ...ref, role: "selected" as const };
             if (ref.role === "selected") return { ...ref, role: "candidate" as const };
             return ref;
         }),

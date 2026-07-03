@@ -5,7 +5,17 @@ import { useParams, useRouter } from "next/navigation";
 import { Alert, App, Button, ConfigProvider, Input, List, Modal, Select, Tag, Tooltip, theme as antdTheme } from "antd";
 import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Save, Settings2, Sparkles, Users, WandSparkles } from "lucide-react";
 
-import { generateCastReferences, normalizeScriptStructure, parseAndApplyScript, selectCastAssetReference, StudioGenerationError, updateCastEntityPrompt, type StudioCastTargetKind } from "@/services/api/studio-generation";
+import {
+    addCastAssetReference,
+    generateCastReferences,
+    normalizeScriptStructure,
+    parseAndApplyScript,
+    removeCastCandidateReference,
+    selectCastAssetReference,
+    StudioGenerationError,
+    updateCastEntityPrompt,
+    type StudioCastTargetKind,
+} from "@/services/api/studio-generation";
 import { studioRepository, type StudioEpisode, type StudioSeries } from "@/services/studio-local";
 import { useConfigStore } from "@/stores/use-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
@@ -292,6 +302,43 @@ export default function StudioWorkspacePage() {
         }
     };
 
+    const removeWorkbenchCandidate = async (kind: StudioCastTargetKind, entityId: string, assetId: string) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await removeCastCandidateReference({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind,
+                entityId,
+                assetId,
+            });
+            setSeries(updated.series);
+            message.success("已移除候选关系，素材仍保留在素材库");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "候选关系移除失败");
+        }
+    };
+
+    const addWorkbenchLibraryAsset = async (kind: StudioCastTargetKind, entityId: string, asset: Asset, role: "candidate" | "selected") => {
+        if (!series || !episode) return;
+        try {
+            const updated = await addCastAssetReference({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind,
+                entityId,
+                asset,
+                role,
+            });
+            setSeries(updated.series);
+            message.success(role === "selected" ? "已设为主参考图" : "已加入候选池");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "素材加入失败");
+        }
+    };
+
     const runCastGeneration = async ({ target, count }: { target: Parameters<typeof generateCastReferences>[0]["target"]; count: 1 | 2 | 4 }) => {
         if (!series || !episode) return;
         if (!readArtDirectionDraft(episode)) {
@@ -423,6 +470,8 @@ export default function StudioWorkspacePage() {
                     onGenerate={(kind, entityId, prompt, count) => void generateWorkbenchCastReferences(kind, entityId, prompt, count)}
                     onSavePrompt={(kind, entityId, prompt) => void saveWorkbenchPrompt(kind, entityId, prompt)}
                     onSelectReference={(kind, entityId, assetId) => void selectWorkbenchReference(kind, entityId, assetId)}
+                    onRemoveCandidate={(kind, entityId, assetId) => void removeWorkbenchCandidate(kind, entityId, assetId)}
+                    onAddLibraryAsset={(kind, entityId, asset, role) => void addWorkbenchLibraryAsset(kind, entityId, asset, role)}
                     onClose={() => setWorkbenchTarget(null)}
                 />
             </main>
