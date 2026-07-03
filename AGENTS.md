@@ -10,8 +10,9 @@
 ## 前端规范
 
 - 前端使用 Next.js App Router、React、TypeScript、Ant Design、Tailwind、Zustand。
-- 编写 Ant Design 相关代码时（不包括Studio部分），参考 https://ant.design/llms-full.txt 理解组件 API、示例和设计规范，并优先结合项目当前 antd 版本与既有写法。
-- - Studio 工作区 UI 详细规范见 `docs/studio-lumenx-visual-standards.md`；修改 Studio UI 前必须阅读并遵守。
+- 普通页面编写 Ant Design 相关代码时，参考 https://ant.design/llms-full.txt 理解组件 API、示例和设计规范，并优先结合项目当前 antd 版本与既有写法。
+- Studio 工作区 `/studio/:seriesId` 是视觉特例：UI 详细规范见 `docs/studio-lumenx-visual-standards.md`；修改 Studio 工作区 UI 前必须阅读并遵守。Studio 可以使用 Ant Design 组件能力，但视觉以 LumenX dark glass 工作台为最高优先级，不套用普通 Ant Design/SaaS 页面风格。
+- `/studio` 项目库属于普通产品页面，可以沿用当前项目外层风格；只有具体 Studio 工作区 `/studio/:seriesId` 使用 LumenX 工作台视觉规范。
 - API 请求统一放在 `web/src/services/api/`。
 - 全局或跨页面状态优先放在 `web/src/stores/`。
 - 已经放在全局 store 或全局 hook 中的状态/动作，组件需要时直接使用对应 store/hook，不要为了“纯组件”层层透传 props；避免一个组件传递过多参数。
@@ -22,7 +23,7 @@
 - 不要新增只做简单转发的组件，例如只 `return <X>{children}</X>` 或只换个名字透传 props；直接在使用处使用真实组件或把逻辑写进当前文件。
 - 页面私有 hook 放在对应页面目录下，例如 `admin/assets/use-admin-assets.ts`；只有多个页面真实复用的 hook 才放到外层 `hooks/`。
 - 页面私有组件放在对应页面目录的 `components/` 下；只在多个页面真实复用时再上提共享。
-- 全局主题、背景、卡片阴影、表格配色等统一在 `web/src/lib/app-theme.ts`、`AppProviders` 或必要的全局 CSS 中配置；页面私有组件不要自己写 `dark ? ...` 主题分支。
+- 普通页面的全局主题、背景、卡片阴影、表格配色等统一在 `web/src/lib/app-theme.ts`、`AppProviders` 或必要的全局 CSS 中配置；页面私有组件不要自己写 `dark ? ...` 主题分支。Studio 工作区允许在局部 `ConfigProvider`、同目录常量或组件 className 中使用 LumenX atelier token，但不要散落新的自创颜色体系。
 - 组件优先使用函数组件和现有 hooks，不新增大型状态管理方案。
 - UI 图标优先使用 `lucide-react` 或项目已经使用的 Ant Design 图标。
 - 页面文案保持中文。
@@ -34,6 +35,7 @@
 
 ## 画布 UI 规范
 
+- 本节只适用于 `/canvas` 相关页面和组件，不适用于 Studio 工作区。
 - 画布 UI 的主题状态统一走 `useThemeStore`；画布编辑器内的颜色与视觉 token 优先复用 `canvasThemes`，Ant Design 组件再按需继承或覆盖 `ConfigProvider` token。
 - 不要硬编码黑白、stone、slate 等颜色导致浅色/深色主题不一致。
 - 新增画布按钮、弹窗、浮层时，尽量复用已有工具栏、节点面板、Modal 的视觉风格。

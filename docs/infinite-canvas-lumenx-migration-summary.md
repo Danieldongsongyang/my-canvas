@@ -1,732 +1,859 @@
-# Infinite Canvas 前端迁移分析总结
+# Infinite Canvas / LumenX Studio 迁移基线
 
-## 1. 背景
+本文是 Studio 迁移的当前实现基线。它不记录访谈流水，只记录后续实现必须遵守的产品行为、模块接口、数据不变量、验收线和 LumenX 对照结论。
 
-- LumenX：/Users/a1/Desktop/无限画布项目汇总/lumenx
-  自己的项目 `infinite-canvas` 已经具备无限画布、AI 生图、图生图、视频生成、提示词库、素材管理等能力，因此它更适合作为主前端壳，而不是被其他项目替代。
+后续讨论和实现优先以本文为准。若 LumenX 源项目已有明确答案，先参考 LumenX 已批准设计文档和源码；只有源项目做法与当前项目边界冲突时，才进行本地适配决策。
 
----
+## 1. 北极星：复原 LumenX 五步生产行为
 
-## 2. 总体结论
+Studio 不是更复杂的 Canvas，也不是普通生图页的项目化版本。Studio 是 LumenX/Loomax 五步生产法在当前项目本地素材库、用户态 relay、当前模型配置和本地仓储上的适配实现。
 
-最适合迁移的是 **LumenX 的 Studio 模块**。
-
-不建议迁移 LumenX 的 Playground 模块，因为它和自己的无限画布功能高度重叠。
-
-更合理的方向是：
+正确行为链路是：
 
 ```text
-infinite-canvas 作为主应用
-├── 无限画布模块
-│   ├── 自由创作
-│   ├── AI 生图
-│   ├── 图生图
-│   ├── 视频生成
-│   ├── 节点编排
-│   └── 资产保存与复用
-│
-└── Studio 短漫剧模块
-    ├── 剧本解析
-    ├── 角色管理
-    ├── 场景管理
-    ├── 道具管理
-    ├── 分镜表
-    ├── 镜头图生成
-    ├── 镜头视频生成
-    ├── 配音
-    ├── 时间线
-    └── 导出
+Script 解析
+        ↓
+Style 定调
+        ↓
+Cast 生成角色 / 场景 / 道具参考图，并保留 variants
+        ↓
+Storyboard 基于 Cast 资产生成镜头候选
+        ↓
+Assembly 选镜头、组装、混音、导出
 ```
 
-一句话总结：
+这条链路是产品真相，不是 UI 排列建议。只做五个 tab，但行为没有沿着这条链路推进，就不是 LumenX Studio 的迁移。
 
-> 保留自己的无限画布作为自由创作入口，把 LumenX Studio 改造成项目制短漫剧生产入口；不要迁移 Playground，否则会和自己的核心能力打架。
+必须复原：
 
----
+- 五步工作法及其因果顺序。
+- Script 产出结构化角色、场景、道具和分镜草稿。
+- Style 作为后续 Cast 和 Storyboard 生成的视觉基线。
+- Cast 负责角色、场景、道具参考资产生产，并保留候选 variants。
+- Storyboard 基于 Cast selected 参考资产生成镜头图片候选。
+- Assembly 负责最终镜头选择、组装、混音和导出。
 
-## 4. 为什么 LumenX Studio 最适合？
+可以本地适配：
 
-LumenX Studio 的核心流程是：
+- 不运行 LumenX Python 后端。
+- 不迁移 LumenX model catalog 作为运行时模型来源。
+- 不迁移 LumenX OSS 路径、输出目录、供应商绑定和文件存储假设。
+- 媒体文件进入当前项目本地素材库 asset，再由 Studio 保存引用。
+- 生成请求走当前项目用户态 relay 和当前用户可用模型。
+- 第一阶段用前端本地仓储，后续可切换 Electron 文件、SQLite 或 manifest。
+
+跑偏信号：
+
+- Cast 只展示实体清单，却不能生成和维护参考图 variants。
+- Storyboard 直接拿镜头 prompt 生图，绕过 Cast selected 参考资产。
+- Style 只是一个展示步骤，对 Cast / Storyboard 生成没有实际影响。
+- Assembly 被简化成导出按钮，而不是最终选择和组装阶段。
+- 页面直接串联 relay、asset 创建和 episode 更新，导致生成行为散落在 UI 里。
+
+## 2. 产品边界
+
+当前项目已经具备无限画布、AI 生图、图生图、视频生成、提示词库和本地素材库能力，不需要迁移 LumenX Playground。
+
+真正值得迁移的是 LumenX Studio：围绕剧本、角色、场景、道具、分镜和连续镜头生产的项目制短漫剧流程。
+
+最终边界：
 
 ```text
-剧本 → 分镜 → 角色/场景/道具资产 → 镜头图 → 镜头视频 → 配音 → 时间线 → 导出
+Canvas  = 自由创作、节点编排、图片/视频生成和视觉迭代
+Studio  = 项目制短漫剧生产，围绕剧本、风格、Cast 参考资产、分镜候选和最终组装推进
+Assets  = 统一素材库，保存、检索、整理和复用所有媒体资产
+Backend = 账号、额度、模型渠道和用户态 AI relay
 ```
 
-这正好补足自己的 `infinite-canvas` 目前相对缺少的部分：**结构化、项目制、长流程的短漫剧生产能力**。
+Studio 和 Canvas 不互相替代。Studio 负责结构化生产，Canvas 负责自由创作；二者通过统一 asset 引用共享媒体。
 
-自己的无限画布更偏向：
+## 3. 不迁移范围
+
+- 不迁移 LumenX Playground 作为独立模块。
+- 不运行或依赖 LumenX Python 后端。
+- 不迁移 LumenX model catalog 作为运行时模型来源。
+- 不迁移 LumenX 供应商绑定、OSS 路径、输出目录或存储路径假设。
+- 不把 `mange-backend` 扩成 Studio 业务后端。
+- 不在第一阶段做完整视频任务队列、批量重试、视频组装、TTS、字幕、时间线和成片导出。
+- 不完整迁移 `SeriesDetailPage`、`EpisodeMiniList`、跨集 Reconcile 和复杂多集管理。
+- 不让 Studio 组件直接依赖 localforage、IndexedDB、本地文件路径、SQLite 或 manifest。
+
+## 4. 五步职责
+
+### 4.1 Script
+
+职责：
+
+- 保存剧本文本。
+- 调用当前文本模型解析剧本。
+- 产出角色、场景、道具和分镜草稿。
+- 生成角色、场景、道具和镜头的 prompt 初稿。
+
+产物：
+
+- `StudioEpisode.script`
+- `StudioEpisode.characters`
+- `StudioEpisode.scenes`
+- `StudioEpisode.props`
+- `StudioEpisode.shots`
+- `episode.generation.scriptParser`
+
+不做：
+
+- 不直接生成 Cast 参考图。
+- 不直接生成镜头图。
+- 不直接生成视频。
+
+### 4.2 Style
+
+职责：
+
+- 确定项目或本集视觉语言。
+- 保存 positive / negative / preset / art direction name。
+- 作为后续 Cast 和 Storyboard 生成的视觉基线。
+
+产物：
+
+- 第一阶段可继续保存在 `episode.generation.artDirection`。
+- 后续多集阶段可提升为 `StudioSeries.stylePrompt` 或系列级 art direction。
+
+不做：
+
+- 不替代 Cast prompt。
+- 不直接生成角色、场景、道具或镜头。
+- 不静默覆盖已有实体 prompt。
+
+关键规则：
+
+Style 必须影响 Cast 和 Storyboard，但不能不可见地影响生成。生成前必须能展示 effective prompt 或保存生成快照，让用户知道 Style 如何参与了这次生成。
+
+### 4.3 Cast
+
+职责：
+
+- 展示本集角色、场景、道具。
+- 为角色、场景、道具生成参考图。
+- 保留每个基础资产的 candidate variants。
+- 维护每个基础资产的 selected reference image。
+- 允许单项重新生成 1 / 2 / 4 张候选。
+- 允许用户从候选中切换主参考图。
+
+产物：
+
+- `StudioCharacter.assetRefs`
+- `StudioScene.assetRefs`
+- `StudioProp.assetRefs`
+- 每个基础资产最多一个 selected image ref。
+- 每个基础资产可以有多个 candidate image ref。
+
+不做：
+
+- 不生成镜头画面。
+- 不生成视频。
+- 不把未选候选当作缓存自动清理。
+
+Cast 是当前最关键的补齐阶段。没有 Cast variants，就没有 LumenX Studio 的角色一致性和后续 Storyboard 参考资产。
+
+### 4.4 Storyboard
+
+职责：
+
+- 展示和编辑分镜草稿。
+- 基于 shot prompt、Style、Cast selected 参考资产生成镜头图片候选。
+- 为每个 shot 保留 selected image 和 candidate variants。
+- 为后续视频生成提供已确认的镜头图或参考图。
+
+产物：
+
+- `StudioShot.prompt`
+- `StudioShot.assetRefs`
+- shot-level selected image ref。
+- shot-level candidate image refs。
+
+不做：
+
+- 不绕过 Cast selected 参考资产直接裸 prompt 生成主流程镜头图。
+- 不生成完整视频队列。
+- 不承担最终成片选择职责。
+
+允许例外：
+
+- 当用户明确选择无参考模式或 Cast 参考图缺失时，可以允许生成，但 UI 必须提示一致性风险。
+
+### 4.5 Assembly
+
+职责：
+
+- 从每个 shot 的候选中确认最终 take。
+- 管理镜头排序、预览、时间线、配音、音乐、字幕和混音。
+- 导出最终短片。
+
+产物：
+
+- episode-level assembly metadata。
+- final takes。
+- preview / exported media asset refs。
+
+不做：
+
+- 不回头承担 Cast 参考资产生成。
+- 不回头承担 Storyboard 镜头候选生成。
+- 不被简化为单个“导出”按钮。
+
+第一阶段 Assembly 可以占位，但行为定义必须保持为最终选择和组装阶段。
+
+## 5. 模块接口和 Seam
+
+这里使用 `codebase-design` 的语言：Studio 迁移应优先设计深 Module。页面只负责展示、触发和局部 UI 状态；生成链路、模型 fallback、asset 创建、variants 规则和 repository 回填应集中在少量深 Module 后面。
+
+### 5.1 Studio Workflow Module
+
+Studio Workflow 是概念 Module，当前可先落在：
 
 ```text
-自由创作 → 节点编排 → 图片/视频生成 → 资产保存与复用
+web/src/services/api/studio-generation.ts
 ```
 
-LumenX Studio 更偏向：
+它的 Interface 应接近 LumenX 工作法，而不是底层 relay 细节。
+
+建议 Interface：
 
 ```text
-剧本驱动 → 分镜管理 → 资产一致性 → 视频生产 → 成片导出
+parseAndApplyScript(input)
+generateCastReferences(input)
+generateShotCandidates(input)
+assembleEpisode(input)
 ```
 
-所以二者不是重复关系，而是互补关系。
+第一阶段先实现前两个：
 
----
+- `parseAndApplyScript`
+- `generateCastReferences`
 
-## 5. 为什么不建议迁移 LumenX Playground？
+Implementation 隐藏：
 
-LumenX Playground 的定位是一个独立的图像/视频生成工作台，通常包括：
+- 文本模型和图像模型 fallback。
+- 当前用户可用模型校验。
+- relay 请求。
+- 生成结果解析。
+- 媒体转 asset。
+- selected / candidate / reference 写入规则。
+- variants 保留规则。
+- 失败摘要写入。
+- repository 多步更新。
 
-- Prompt 输入；
-- 模型选择；
-- 参数配置；
-- 文生图；
-- 图生图；
-- 文生视频；
-- 图生视频；
-- 任务队列；
-- 结果画廊；
-- Prompt 历史；
-- 素材选择。
+页面不要直接知道 raw relay payload、asset 存储细节或 repository 的多步写入顺序。
 
-但这些能力和自己的无限画布高度重叠。
+### 5.2 Studio Repository Module
 
-自己的无限画布已经承担了“自由生成工作台”的角色，而且比传统 Playground 更灵活，因为它支持节点、画布、素材联动和多轮视觉迭代。
-
-如果再迁移一个完整 Playground，会造成：
-
-1. **功能重复**：两个地方都能生图、生成视频、调参数；
-2. **用户困惑**：不知道应该在 Canvas 里生成，还是去 Playground 生成；
-3. **代码冗余**：模型选择、参数面板、任务状态、结果展示会重复实现；
-4. **产品边界混乱**：Canvas 和 Playground 都在做自由创作，定位冲突。
-
-因此，Playground 不应作为独立模块迁移。
-
----
-
-## 7. LumenX Studio 中最值得迁移的模块
-
-LumenX 当前 Studio 同时存在旧 i2v legacy 流程和新版 unified/R2V 流程。第一阶段优先迁移新版 unified/R2V 流程，旧流程组件只作为局部复用或兼容参考。
-
-建议按当前迁移优先级迁移：
-
-| 优先级 | 模块                                          | 价值                                                                    |
-| ------ | --------------------------------------------- | ----------------------------------------------------------------------- |
-| P0     | Studio 项目壳                                 | 项目列表、项目详情、步骤导航和本地数据仓储边界，是承载迁移组件的入口    |
-| P0     | ScriptProcessor                               | 剧本输入和实体提取，是短漫剧流程入口                                    |
-| P0     | ArtDirection                                  | 统一画风和视觉风格，影响后续角色、分镜和视频生成                        |
-| P0     | Cast                                          | 新版统一流程中的角色、场景、道具管理入口，优先于旧 ConsistencyVault     |
-| P0     | StoryboardR2V                                 | 新版统一流程的分镜和镜头生成工作台，是 Studio 核心                      |
-| P0     | 基础 relay 生成适配                           | 让 Studio 能通过当前登录态、模型列表和用户态 AI relay 发起生成          |
-| P1     | VideoAssembly                                 | 视频组装、混音和导出预览，形成短漫剧闭环                                |
-| P1     | 任务队列面板                                  | 多镜头生成、状态追踪、失败重试和结果回填                                |
-| P1     | Studio 与本地素材库互通                       | 将角色、场景、道具和镜头结果记录为 asset，并建立 Studio 候选引用        |
-| P1     | Studio 与 Canvas 互通                         | 通过 asset 引用支持发送到 Canvas 自由编辑，并从 Canvas 回填 Studio 关系 |
-| P2     | 旧 ConsistencyVault                           | 作为一致性资产库的局部参考，不作为第一阶段主流程                        |
-| P2     | 旧 StoryboardComposer / StoryboardFrameEditor | 作为旧分镜编辑交互参考，不作为第一阶段主流程                            |
-| P2     | 旧 VideoGenerator / VideoQueue                | 作为旧视频生成和队列交互参考，不作为第一阶段主流程                      |
-| P2     | 配音、时间线和最终导出                        | 视产品范围决定，可在主流程稳定后补齐                                    |
-
----
-
-## 8. 推荐的产品架构
-
-最终项目可以拆成四个主要区域：
+核心入口：
 
 ```text
-/app
-├── /canvas
-│   └── 无限画布，自由创作入口
-│
-├── /studio
-│   └── 短漫剧 Studio，结构化生产入口
-│
-├── /assets
-│   └── 统一资产库
-│
-└── /settings
-    └── 模型、供应商、账号、存储配置
+web/src/services/studio-local.ts
 ```
 
-其中：
+职责：
 
-- `/canvas` 负责自由创作；
-- `/studio` 负责短漫剧项目流程；
-- `/assets` 负责统一资产保存、检索、整理和复用；
-- `/settings` 负责模型和系统配置。
+- 管理 Studio 本地数据读写。
+- 隐藏 localforage / IndexedDB / Electron 文件 / SQLite / manifest 的底层差异。
+- 提供窄仓储 Interface。
 
-Studio 的底层数据模型第一阶段就预留“系列 / 剧集”边界：
+第一阶段不急着为每个行为新增很多 repository 方法。可以继续使用 `updateEpisode`，但复杂生成规则不要散落在页面里。
+
+### 5.3 Studio Workspace Model Module
+
+核心入口：
+
+```text
+web/src/app/(user)/studio/[seriesId]/studio-workspace-model.tsx
+```
+
+职责：
+
+- 纯计算派生 UI 所需数据。
+- 计算 Pipeline 状态。
+- 计算 Cast 卡片 selected 图、candidate 数、prompt 摘要、失败状态和顶部按钮文案。
+- 计算 Storyboard 卡片候选状态和生成前检查。
+
+它是 in-process Module，适合通过单元测试覆盖，不应发起 I/O。
+
+### 5.4 Asset Reference Module
+
+核心入口：
+
+```text
+web/src/services/asset-references.ts
+```
+
+职责：
+
+- 扫描 Studio 和 Canvas 对 asset 的引用。
+- 阻止仍被引用的 asset 被硬删。
+- 报告引用位置。
+
+Studio 生成、导入、上传出的媒体必须先成为 asset，再写 Studio 或 Canvas 引用。
+
+## 6. 数据模型和不变量
+
+### 6.1 核心模型
+
+核心模型保持窄字段加扩展容器：
 
 ```text
 StudioSeries
-  作品级信息：标题、简介、共享画风、共享角色、共享场景、共享道具、模型偏好
+  - 项目标题、简介、模型偏好、共享配置和剧集引用
 
 StudioEpisode
-  单集信息：剧本、分镜、镜头候选、镜头视频、当前流程状态
+  - 剧本、角色、场景、道具、分镜、生成元数据和扩展引用
+
+StudioCharacter / StudioScene / StudioProp
+  - 名称、描述、prompt、assetRefs、generation、metadata
+
+StudioShot
+  - 镜头描述、prompt、对白、assetRefs、generation、metadata
+
+StudioAssetRef
+  - 指向素材库 asset 的引用关系
 ```
 
-第一阶段 UI 先保持最小可用形态：用户看到的是“创建一个短漫剧项目”，系统默认生成一个系列和 Episode 01。完整剧集管理、跨集资产复用面板和 LumenX 复杂系列页迁移放到 MVP 后继续完善。
+不把 LumenX 旧字段整包搬入核心模型。确实需要保留的字段进入 `metadata`、`generation` 或 `refs` 等明确扩展容器。
 
----
+### 6.2 Variants 映射
 
-## 9. Canvas 和 Studio 的关系
-
-Canvas 和 Studio 不应该互相替代，而应该互相协作。
-
-第一阶段先明确媒体边界：
+LumenX 的 `reference_sheet.image_variants`、`image_asset.variants` 和 `selected_id` 语义映射到当前项目统一的 `assetRefs`：
 
 ```text
-本地素材库 / asset
-  保存所有成功生成、导入或上传的媒体资产
-
-Studio 候选媒体
-  是 asset 在 Studio 项目、镜头、角色、场景或道具中的候选引用
-
-Canvas 节点媒体
-  是 asset 在画布节点中的引用
+LumenX ImageVariant
+        ↓
+本地素材库 asset
+        ↓
+StudioAssetRef(role: "candidate" | "selected")
 ```
 
-也就是说，Studio 或 Canvas 成功生成出的图片、视频应进入本地素材库成为 asset；选中、不选中、收藏、归档、打标签只是 asset 的不同使用关系或整理状态。Studio 和 Canvas 不直接共享对方的过程数据，而是都通过 asset 引用同一份媒体资产。
+LumenX 的 `prompt_used` 映射为：
 
-Studio 候选媒体不是临时缓存。即使某张候选图没有被选为当前镜头结果，只要它仍然记录在 Studio 项目、镜头、角色、场景或道具中，就必须保留候选引用，方便用户后续回看、比较和重新选择。删除候选引用只解除 Studio 关系，不等于删除本地素材库中的 asset。
+```text
+StudioAssetRef.metadata.promptSnapshot
+```
 
-在这个模型下，原先“Studio 候选媒体不在素材库，可能被本地媒体清理误删”的问题不再成立。实现重点变成：生成链路必须先创建 asset，再写入 Studio 或 Canvas 的引用关系；删除 asset 时必须检查 Studio 和 Canvas 引用，避免破坏仍在使用的候选或节点。
+当前项目不为每种实体新增独立 `image_asset` 容器，优先复用 `assetRefs`。
 
-asset 删除策略采用保护优先：
+### 6.3 selected / candidate / reference 不变量
+
+- 同一个 Studio 角色、场景、道具或镜头可以有多个 `role: "candidate"` 的 image ref。
+- 同一个 Studio 角色、场景、道具或镜头，同一媒体类型最多只有一个 `role: "selected"` ref。
+- 将 candidate 设为主图时，旧 selected image ref 降级为 candidate，不删除旧图，也不改成 reference。
+- `reference` 只表示明确作为生成参考图的关系，不表示“曾经选中过”。
+- 第一次 Cast 一键生成返回的单张图直接写为 selected image。
+- Cast 后续单项重新生成返回的新图默认写为 candidate。
+- Storyboard 空镜头首次单张生成可以自动成为 selected image。
+- 未选 candidate 不是缓存，不应自动丢弃。
+- 删除 Studio 候选只解除 Studio 关系，不删除底层 asset。
+
+### 6.4 Prompt 和 Style 快照
+
+基础资产和镜头都需要有用户可见 prompt：
+
+- `StudioCharacter.prompt`
+- `StudioScene.prompt`
+- `StudioProp.prompt`
+- `StudioShot.prompt`
+
+Style 也必须参与后续生成，但要透明：
+
+```text
+entity.prompt
+        +
+effective art direction / style prompt
+        ↓
+effectivePrompt
+        ↓
+生成请求
+```
+
+生成前 UI 应能展示 effective prompt 或关键摘要。每张生成图的参数摘要记录在 `StudioAssetRef.metadata`，至少包含：
+
+- `source`
+- `promptSnapshot`
+- `styleSnapshot`
+- `effectivePromptSnapshot`
+- `model`
+- `createdAt`
+
+按需包含：
+
+- `count`
+- `aspectRatio`
+- `batchId`
+- `targetKind`
+- `targetId`
+
+规则：
+
+- Style 更新后，不静默覆盖已有实体 prompt。
+- 可以提示“可根据当前 Style 重组 prompt”。
+- 一键重组必须先展示草稿，用户确认后才写回。
+- 生成适配层不得把用户完全看不见的创作上下文塞进请求。
+- 生成失败摘要写入 `entity.generation.lastImageError` 或 `shot.generation.lastImageError`。
+- 成功生成后清除对应 last error。
+
+## 7. 媒体资产边界
+
+Studio 不拥有自己的媒体存储。所有生成、导入或上传成功的媒体，必须先成为本地素材库 asset。
+
+```text
+生成 / 导入 / 上传
+        ↓
+创建 asset
+        ↓
+Studio 候选或 Canvas 节点保存 asset 引用
+```
+
+生成接口拿到媒体返回值不等于完成。只有 asset 创建成功，并且 Studio 或 Canvas 引用写入成功，才算完成一次可追踪的生成结果。
+
+失败处理：
+
+- 图片生成失败：不创建 asset，不清空已有候选。
+- asset 创建失败：不写入 Studio 引用，提示用户重试。
+- asset 已创建但 Studio 引用写入失败：允许 asset 留在素材库，并提示“图片已保存到素材库，但未挂接到 Studio”。
+- 删除 Studio 候选只解除 Studio 关系，不删除底层 asset。
+
+删除 asset 时采用保护优先：
 
 ```text
 删除 asset
         ↓
 检查 Studio 引用和 Canvas 引用
         ↓
-如果存在引用，阻止删除并展示引用位置
+存在引用则阻止删除，并展示引用位置
         ↓
-用户先解除引用
-        ↓
-无引用后才允许删除 asset
+用户解除引用后才允许删除 asset
 ```
 
-第一阶段不做级联清空引用，也不提供默认强制删除；危险强删需要影响预览和恢复策略，放到后续再设计。
+第一阶段不做默认强删，也不做级联清空引用。
 
-第一阶段推荐的产品闭环是：
+## 8. 生成和模型
 
-```text
-Studio 负责流程管理
-Canvas 负责自由创作
-Assets / 素材库负责跨模块资产保存、检索和复用
-Backend 负责账号、额度、模型渠道和 AI relay
-```
+Studio 生成走当前项目用户态 relay，不新增 Studio 业务后端。
 
----
-
-## 10. 和自己后端的关系
-
-因为自己已经有独立后端，所以不需要迁移 LumenX、ArcReel、Jellyfish 的后端。
-
-迁移时应该只迁移或参考它们的前端：
+核心入口：
 
 ```text
-迁移重点：
-- 页面结构
-- 组件组织
-- 前端状态管理
-- 业务流程
-- 数据模型设计
-- 交互方式
-
-不迁移重点：
-- 原项目后端
-- 原项目 API 假设
-- 原项目任务队列实现
-- 原项目存储逻辑
-- 原项目模型供应商绑定
-```
-
-LumenX Studio 前端第一阶段不改造成调用新的项目业务后端 API，而是改造成使用当前项目的本地数据仓储边界和现有 relay 边界。
-
-建议在自己的前端中建立清晰的 Studio 适配层：
-
-```text
-web/src/services/studio-local.ts
-  └── Studio 本地数据仓储边界。
-      第一阶段 Web 实现可复用 localforage / IndexedDB；
-      未来 Electron 桌面端可在该边界下切换到本地文件、SQLite 或项目 manifest。
-      Studio 组件不得直接依赖具体存储引擎。
-
 web/src/services/api/studio-generation.ts
-  └── Studio 需要的剧本解析、提示词组装、结构化结果校验和生成调用适配，底层走现有 request / relay 边界
 ```
 
-这样可以避免把 LumenX 原始 API 结构硬塞进自己的项目，也避免第一阶段把 mange-backend 扩张成 Studio 业务后端。
-
----
-
-## 11. 实施进度记录
-
-> 本节用于中断后恢复上下文。每次实施应记录已完成切片、验证命令和下一步。
-
-### 2026-07-01
-
-- 状态：开始执行 Studio MVP 第一批实现切片。
-- 当前目标：优先完成 Issue 1「接入口和空 Studio 壳」，并补上 Issue 2 的最小 Studio 类型与本地仓储边界，让项目创建不直接依赖页面状态。
-- 已确认边界：不迁移 LumenX Playground，不新增 mange-backend Studio 业务接口，不接真实生成，不复制 LumenX 完整应用壳。
-- 待执行：先写工具入口、路由保护、Studio 仓储的回归测试，再实现 `/studio` 项目列表与 `/studio/[seriesId]` Episode 01 工作台壳。
-
-#### 15:30 进度
-
-- 已完成：工具入口页的“AI 漫剧生成”已从占位状态改为可进入 `/studio`。
-- 已完成：桌面端登录保护已覆盖 `/studio` 与 `/studio/[seriesId]`。
-- 已完成：新增 `web/src/services/studio-local.ts`，定义 `StudioSeries`、`StudioEpisode`、`StudioShot`、`StudioAssetRef` 等窄核心类型，并提供本地仓储边界。
-- 已完成：新增 `/studio` 项目库空态、创建项目弹窗、项目卡片与删除入口。
-- 已完成：新增 `/studio/[seriesId]` Episode 01 工作台壳，可查看项目、编辑并保存剧本草稿。
-- 已验证：`bun run test src/lib/tool-hub.test.ts src/lib/desktop-routes.test.ts src/services/studio-local.test.ts` 通过。
-- 已验证：`bun run typecheck` 通过。
-- 已验证：`bun run test` 全量测试通过。
-- 自审结果：未发现 Studio 页面直接依赖 localforage / IndexedDB；未新增 mange-backend Studio 业务接口；未迁移 LumenX 复杂组件或真实生成链路。
-- 下一步：Issue 3 asset-first 引用边界，或 Issue 4 剧本解析真实 relay 闭环。
-
-#### 15:40 进度
-
-- 当前目标：执行 Issue 3「asset-first 引用边界」。
-- 已完成：新增 `web/src/services/asset-references.ts`，集中扫描 Studio 与 Canvas 对 asset 的引用，并提供删除前检查结果。
-- 已完成：Canvas 节点 metadata 支持 `assetRef` / `assetRefs`，用于保存 asset-first 引用关系。
-- 已完成：从素材库插入 Canvas 的文本、图片、视频 payload 会携带 `assetRef`，Canvas 节点会写入同一个 asset 引用模型。
-- 已完成：`useAssetStore.removeAsset()` 改为保护删除；删除前检查 Studio 和 Canvas 引用，被引用时不移除 asset。
-- 已完成：我的素材页删除被引用 asset 时，会展示 Studio / Canvas 引用位置，提示先解除引用。
-- 已验证：`bun run test src/services/asset-references.test.ts src/lib/local-asset-library.test.ts` 通过。
-- 已验证：`bun run typecheck` 通过。
-- 已验证：`bun run test` 全量测试通过。
-- 自审结果：未引入 Studio 自有媒体存储；未新增后端接口；未把 localforage / IndexedDB 泄漏进 Studio 或 Canvas 组件；删除保护集中在 asset 引用服务和资产 store 边界。
-- 下一步：进入 Issue 4「Studio 生成适配层最小闭环」，先跑剧本解析真实 relay 链路。
-
-#### 15:50 进度
-
-- 当前目标：执行 Issue 4「Studio 生成适配层最小闭环」。
-- 已完成：新增 `web/src/services/api/studio-generation.ts`，提供 `parseScript()`、`parseAndApplyScript()` 和 `requestStudioChatCompletion()`。
-- 已完成：Studio 剧本解析 prompt、JSON 代码块清洗、结构化 JSON 提取、zod 校验、字段映射已移植到 TypeScript 适配层。
-- 已完成：第一条真实链路走当前 `textModel` 的 chat completions；远程模式复用 `/api/canvas/relay/chat/completions`、当前登录用户 relay header 和现有 `ai-request` 边界。
-- 已完成：解析结果会写入 `StudioEpisode` 的 `characters`、`scenes`、`props`、`shots` 和 `generation.scriptParser`，并保留剧本内容。
-- 已完成：`/studio/[seriesId]` Episode 01 工作台新增“解析剧本”按钮、解析失败提示、角色/场景/道具/分镜草稿摘要展示，以及可手动保存的结构草稿 JSON。
-- 已完成：坏 JSON 或结构不符合 schema 时抛出可恢复错误，不写回 episode，保留用户已有手工内容；手工结构草稿复用同一套 Studio schema 校验与字段映射。
-- 已验证：`bun run test src/services/api/studio-generation.test.ts src/services/api/relay-requests.test.ts` 通过。
-- 已验证：`bun run typecheck` 通过。
-- 已验证：`bun run test` 全量测试通过。
-- 自审结果：未新增 Studio 后端接口；Studio 生成请求复用现有 `ai-request` 和用户态 relay；Studio 页面仍只通过仓储边界写本地项目数据，未直接依赖 localforage / IndexedDB；失败路径不覆盖用户手工内容。
-- 下一步：提交本次 Issue 4；之后进入 Issue 5「适配性移植 LumenX Studio 组件」，优先 ScriptProcessor 组件化迁移。
-
-#### 15:58 Review 修复进度
-
-- 当前目标：处理 Issue 4 自审发现的真实 relay 兼容性和 generation 元数据保护问题。
-- 已完成：`requestStudioChatCompletion()` 在模型或 relay 不支持 `response_format` / JSON mode 时，会自动重试一次不带 `response_format` 的 chat completions 请求。
-- 已完成：`parseAndApplyScript()` 写入 `generation.scriptParser` 时会保留 episode 已有 `generation` 字段，避免覆盖手动结构草稿或后续生成元数据。
-- 已完成：手动保存结构草稿的 schema 错误文案已从 AI 解析错误中拆出，避免用户手动编辑 JSON 时看到“AI 返回内容”。
-- 已新增回归测试：不支持 `response_format` 时的 Studio relay fallback；解析成功后保留已有 `generation.manualStructure`。
-- 已验证：`bun run test src/services/api/studio-generation.test.ts src/services/api/relay-requests.test.ts` 通过。
-- 已验证：`bun run typecheck` 通过。
-- 已验证：`bun run test` 全量测试通过。
-- 下一步：进入 Issue 5「适配性移植 LumenX Studio 组件」。
-
-#### 17:01 Issue 5 进度
-
-- 当前目标：执行 Issue 5「适配性移植 LumenX Studio 组件」，先把工作台空间结构对齐 LumenX，再迁移 ScriptProcessor。
-- 已对照源码：`/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/project/ProjectClient.tsx`、`PipelineSidebar.tsx`、`ScriptProcessor.tsx`、`StepPageHeader.tsx`、`SidePanelHeader.tsx`。
-- 已完成：`/studio/[seriesId]` 从普通后台详情页重排为 LumenX unified/R2V 风格的全屏 pipeline shell：左侧 5 步 rail，主区域按 step 切换，Script 步骤采用左侧剧本编辑 + 右侧结构草稿栏。
-- 已完成：新增 `studio-workspace-model.tsx`，集中生成 `Script / Art Direction / Cast / Storyboard / Assembly` 五步和状态，页面不再硬编码临时 nav。
-- 已完成：当前 Issue 4 的剧本保存、AI 解析、结构 JSON 手动保存能力已搬入新的 ScriptProcessor 布局。
-- 已完成：Art Direction、Cast、Storyboard、Assembly 暂以 LumenX pipeline 占位方式保留入口，后续按 Issue 5 顺序逐个接入真实组件。
-- 已新增回归测试：`studio-workspace-model.test.ts` 覆盖 LumenX unified/R2V 步骤顺序、状态推导和结构草稿格式化。
-- 已验证：`bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts' src/services/api/studio-generation.test.ts src/services/api/relay-requests.test.ts` 通过。
-- 已验证：`bun run typecheck` 通过。
-- 已验证：`bun run test` 全量测试通过。
-- 已知限制：headless 浏览器访问 `/studio` 会被登录页拦截，无法在无登录态下截图工作台；需在已登录桌面窗口中目测确认最终视觉。
-- 下一步：提交 Issue 5 第一段；然后继续迁移 ArtDirection 或先做一次真实视觉对照微调。
-
-媒体层口径：
+模型来源：
 
 ```text
-Studio 不新增自己的媒体存储体系
+全局 AI 配置
         ↓
-生成 / 导入 / 上传成功后先创建 asset
+Studio 项目级 text / image / video 模型偏好
         ↓
-当前 Web 阶段 asset 媒体由 image-storage / file-storage 存入 IndexedDB
-        ↓
-未来 Electron 阶段 asset 媒体由同一存储边界迁移到本地文件系统
+生成链路使用项目偏好，未设置时跟随全局配置
 ```
 
-第一阶段仍然用当前项目的 localforage / IndexedDB 快速跑通 MVP，但代码结构必须按 Electron 文件落盘来设计，不把 localforage 泄漏到组件和业务模型里。
+模型偏好使用规则：
 
-LumenX 的 Python `ScriptProcessor`、prompt 模板、JSON schema、结果清洗和字段映射只作为迁移参考，不作为第一阶段运行时依赖。第一阶段应把这些生成逻辑移植成当前前端的 TypeScript 适配层，并复用现有 `ai-request`、`image`、`video` 等服务。
+- 项目级模型仍在当前可用模型列表中时，优先使用项目级模型。
+- 项目级模型已经不可用时，降级到全局模型，并在 UI 上给出提示或 missing 状态。
+- 全局模型也不可用时，生成按钮禁用，并引导用户去全局 AI 配置。
+- 不把 LumenX catalog 中存在但当前用户不可用的模型展示为可选项。
+- LumenX model catalog 只作为参数面板、模型分组和特殊参数设计参考，不作为运行时模型列表来源。
 
-模型配置口径：
+## 9. 当前实现状态
 
-```text
-模型列表和默认选择以当前项目配置为准
-        ↓
-候选模型来自当前用户在 mange-backend 下可用的模型列表
-        ↓
-Studio 项目可本地保存 text / image / video 模型偏好
-        ↓
-LumenX model catalog 只参考参数面板、模型分组和特殊参数支持
-```
-
-也就是说，LumenX model catalog 不作为 Studio 第一阶段的模型来源，不迁移原项目供应商绑定或独立模型目录。
-
----
-
-## 11. 迁移策略
-
-不建议“一次性复制整个 Studio”。
-
-建议分阶段迁移：
-
-### 11.0 迁移口径：适配性移植
-
-Studio 迁移不应理解为从零重写 UI，也不应理解为原样复制 LumenX 的整个前端应用。
-
-更准确的口径是：
-
-```text
-以 LumenX Studio 组件为基础
-        ↓
-保留业务布局、关键交互、状态组织和视觉肌理
-        ↓
-替换或适配 API、路由、持久化、主题 token、组件库版本和局部样式
-        ↓
-接入当前项目的 Next.js / React / Ant Design / Tailwind / Zustand 体系
-```
-
-也就是说，迁移重点是 **基于 LumenX 组件的适配性移植**，不是从空白页面重新设计一套 Studio。
-
-视觉节奏上采用：
-
-```text
-第一阶段：可用、像 LumenX、少改动
-第二阶段：流程稳定后，再逐步统一到当前项目视觉体系
-```
-
-第一阶段只处理必要的外层入口、登录态、主题变量、组件库版本和冲突样式，不在迁移过程中顺手重设计 Studio。
-
-### 第一阶段：搭建 Studio 壳和统一 R2V 主流程
-
-目标：
-
-- 复用工具入口页中已经预留的“AI 漫剧生成”入口，将其从 `soon` 状态改为可进入 Studio；
-- 新增或接通 `/studio` 路由；
-- 新增项目列表；
-- 新增短漫剧项目详情页；
-- 建立 Studio 状态管理和本地数据仓储边界；
-- 底层数据模型预留 `StudioSeries` 和 `StudioEpisode`，第一阶段 UI 只暴露单项目单集；
-- 适配迁移 LumenX 的 `ScriptProcessor`、`ArtDirection`、`Cast` 和 `StoryboardR2V`；
-- 接入当前登录态、可用模型和用户态 AI relay；
-- 跑通 Studio 最小生成闭环：剧本解析、实体草稿、用户确认、R2V 分镜或镜头 prompt、至少一次图像或视频候选生成、结果回填本地项目数据；
-- AI 结果必须可手动编辑，AI 失败不能阻塞 Studio 继续使用；
-- 暂不新增 Studio 业务后端。
-
-第一阶段不要求完成完整视频任务队列、批量重试、视频组装和导出。这些事项记录在 [Studio MVP 后待办](./studio-post-mvp-todos.md)，等最小生成闭环跑通后继续完善。
-
-第一阶段也不要求完整迁移 LumenX 的 `SeriesDetailPage`、`EpisodeMiniList`、跨集 Reconcile 和复杂系列管理。数据模型先预留，复杂交互放到 MVP 后。
-
-第一批实现按 [Studio MVP 第一批实现切片](./studio-mvp-implementation-slices.md) 推进：
-
-```text
-Issue 1：接入口和空 Studio 壳
-Issue 2：Studio 类型和仓储边界
-Issue 3：asset-first 引用边界
-Issue 4：Studio 生成适配层最小闭环（先跑剧本解析真实 relay 链路）
-Issue 5：适配性移植 LumenX Studio 组件
-```
-
-### 第二阶段：跑通剧本、演员表和 R2V 分镜
-
-目标：
-
-- 剧本输入；
-- 剧本解析；
-- 角色、场景、道具提取和确认；
-- 画风设定；
-- 分镜列表；
-- 单个镜头的图像候选、参考图和视频候选。
-
-这是 Studio 的核心 MVP。
-
-### 第三阶段：打通素材库和 Canvas
-
-目标：
-
-- Studio 角色、场景、道具和镜头结果生成后进入本地素材库；
-- Studio 项目保存这些 asset 的候选、选中和项目关系；
-- Canvas 节点引用本地素材库中的 asset；
-- Studio 和 Canvas 通过 asset 复用媒体，而不是直接复制对方过程数据。
-
-这一阶段决定 Canvas 和 Studio 是否形成产品闭环。
-
-### 第四阶段：完善视频生成和任务队列
-
-目标：
-
-- 单个镜头图生视频；
-- 多镜头批量生成；
-- 任务状态追踪；
-- 失败重试；
-- 结果回填分镜；
-- 任务队列面板。
-
-### 第五阶段：迁移组装、配音、时间线和导出
-
-目标：
-
-- TTS 配音；
-- 镜头排序；
-- 时间线预览；
-- 视频合成；
-- 导出成片。
-
----
-
-## 12. 技术改造注意点
-
-### 12.1 Next.js 版本差异
-
-LumenX 是 Next.js 14，自己的项目是 Next.js 16。
-
-需要注意：
-
-- App Router 写法是否一致；
-- 动态导入方式；
-- Client Component 和 Server Component 边界；
-- 环境变量读取方式；
-- 构建配置差异。
-
-### 12.2 React 版本差异
-
-LumenX 使用 React 18，自己的项目使用 React 19。
-
-大部分普通组件迁移问题不大，但要注意：
-
-- 旧 hooks 写法；
-- 第三方组件兼容性；
-- 严格模式下副作用重复执行；
-- React 19 下部分库是否存在警告。
-
-### 12.3 Tailwind 版本差异
-
-LumenX 使用 Tailwind 3，自己的项目使用 Tailwind 4。
-
-需要注意：
-
-- 配置文件差异；
-- class 是否仍然生效；
-- 自定义主题变量；
-- 动画和插件配置。
-
-### 12.4 UI 体系差异
-
-自己的项目已经使用 Ant Design 6。
-
-因此 LumenX Studio 的组件不建议原样保留 UI，而是应该逐步接入自己的设计体系：
-
-```text
-LumenX 组件逻辑
-        ↓
-保留业务状态和交互结构
-        ↓
-替换为自己的 Ant Design / Radix / Tailwind UI
-```
-
-### 12.5 API 层重写
-
-因为使用自己的后端，所以 LumenX 的 API 调用需要重写。
-
-建议不要在组件里直接写 fetch，而是统一封装：
-
-```text
-组件
- ↓
-studio service
- ↓
-统一 request client
- ↓
-自己的后端 API
-```
-
----
-
-## 13. 最终推荐方案
-
-最终推荐：
-
-```text
-主项目：infinite-canvas
-
-保留：
-- 自己的无限画布
-- 自己的模型配置
-- 自己的素材库
-- 自己的视频生成能力
-- 自己的后端
-
-重点迁移：
-- LumenX Studio 的业务流程
-- LumenX Studio 的分镜系统
-- LumenX Studio 的角色/场景/道具管理
-- LumenX Studio 的一致性资产管理
-- LumenX Studio 的视频任务队列和导出流程
-
-选择性参考：
-- LumenX Playground 的参数面板、任务队列、结果画廊
-- ArcReel 的任务系统、供应商配置、成本统计、剪映导出
-- Jellyfish 的角色一致性、结构化分镜、资产模型
-
-不建议：
-- 整体迁移 LumenX Playground
-- 同时整合三个项目的完整前端
-- 把其他项目后端强行并入自己的后端
-```
-
----
-
-## 14. 最核心判断
-
-这次讨论得出的核心判断是：
-
-> 你的无限画布已经覆盖了 Playground 的价值；你真正缺的是 Studio 这种围绕剧本、分镜、角色一致性和镜头视频生成的结构化生产台。
-
-所以：
-
-```text
-Canvas = 自由创作
-Studio = 项目制短漫剧生产
-Assets = 统一资产保存、检索、整理和复用
-Backend = 账号、额度、模型渠道和 AI relay
-```
-
-这是最清晰、最适合长期演进的产品架构。
-
----
-
-## 15. 一句话版
-
-**不要把 LumenX Playground 搬进来；把 LumenX Studio 改造成自己的短漫剧模块，并让它和现有无限画布、素材库、后端任务系统打通。**
-
----
-
-## 16. 实施进度记录
-
-### 2026-07-01 17:20 Issue 5 第二段/收尾
-
-本次继续执行 Issue 5：在上一段已经完成 LumenX 式 Studio 工作台壳、左侧 PipelineRail、ScriptProcessor 迁移的基础上，继续迁移 ArtDirection，并尽量完成 Issue 5 剩余组件。
+第一批 Studio MVP 基础已完成，可以视为“Studio 壳、数据边界、剧本解析、轻量工作台”阶段结束。
 
 已完成：
 
-- 参考 LumenX 源文件：
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ArtDirection.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/Cast.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/StoryboardR2V.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/storyboard-r2v/StoryboardGenerateDialog.tsx`
-- 按 TDD 先补 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts`：
-  - ArtDirection 草稿会归一化为 `episode.generation.artDirection` 可保存结构。
-  - Cast 会从当前 Episode 的 characters / scenes / props 和 shot 文本提及生成三组素材清单。
-  - StoryboardR2V 轻量卡片会按镜头顺序生成 prompt，并保留对白标记。
-- 扩展 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.tsx`：
-  - 新增本地 `STUDIO_STYLE_PRESETS`，避免依赖 LumenX 后端风格预设接口。
-  - 新增 `normalizeArtDirectionDraft()`、`readArtDirectionDraft()`。
-  - 新增 `buildCastSections()`、`buildStoryboardCards()`。
-- 扩展 `web/src/app/(user)/studio/[seriesId]/page.tsx`：
-  - `art_direction` 不再是占位页，已迁移为 LumenX 风格的推荐风格、内置预设、分类切换、prompt 编辑和底部“应用并继续”保存栏。
-  - 风格保存写入当前 Episode 的 `generation.artDirection`，并保留已有 `generation` 元数据。
-  - `cast` 不再是占位页，已迁移为本集角色/场景/道具三类资产透视，带全部/角色/场景/道具 tab、出现次数和 ready/pending 状态。
-  - `storyboard_r2v` 不再是占位页，已迁移为轻量 StoryboardR2V 工作区：按 Episode shots 展示镜头卡、prompt、对白标记、候选计数，以及右侧生成前检查。
-  - `assembly` 仍保留占位，因为 Issue 5 明确只要求 ScriptProcessor、ArtDirection、Cast、StoryboardR2V 轻量版；完整 assembly/export 属于后续 MVP-after 范围。
+- `/studio` 项目库已建立，支持创建、打开和删除 Studio 项目。
+- `/studio/[seriesId]` 已建立 Episode 01 工作台。
+- 桌面端路由保护已覆盖 Studio 项目库和工作台。
+- `studio-local` 已定义 Studio 类型和本地仓储边界。
+- `asset-references` 已集中扫描 Studio / Canvas 对 asset 的引用。
+- Canvas 节点 metadata 已支持 `assetRef` / `assetRefs`。
+- 素材库删除 asset 时已具备 Studio / Canvas 引用保护。
+- `studio-generation` 已跑通剧本解析真实 relay 链路。
+- 剧本解析结果会写入角色、场景、道具和分镜草稿。
+- AI 解析失败、坏 JSON、schema 错误不会覆盖用户已有手工内容。
+- Studio 工作台已对齐 LumenX unified/R2V 的 5 步流程：Script、Art Direction、Cast、Storyboard、Assembly。
+- ScriptProcessor、ArtDirection、Cast、轻量 StoryboardR2V 已完成适配性迁移。
+- Assembly 仍是占位，视频组装、混音和导出属于后续阶段。
+- Studio 工作台视觉已校准为 LumenX dark glass 风格，具体工作区隐藏全局顶部导航。
+- 左侧底部已补齐项目级生成设置入口，可保存 text / image / video 模型偏好。
 
-当前已验证：
+当前实际缺口：
 
-- `bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts'`
-- `bun run typecheck`
+- 代码中的 `StudioCharacter`、`StudioScene`、`StudioProp` 尚未补齐核心 `prompt` 和 `generation` 字段。
+- 剧本解析结果目前主要写入 `name`、`description` 和分镜草稿，尚未形成完整 Cast 生产 prompt 初稿。
+- Cast 当前只是本集素材清单和 ready / pending 状态展示，还不是可生成、可迭代、可选择主图的生产步骤。
+- Style 已有 UI 和保存能力，但还没有作为可见 effective prompt 参与 Cast / Storyboard 生成。
+- Storyboard 当前展示镜头 prompt 和候选计数，但尚未基于 Cast selected 参考资产生成镜头候选。
+- Assembly 只是占位，尚未承担最终选择、组装、混音和导出。
 
-Review 后修正：
+当前阶段的正确推进方向：
 
-- ArtDirection 的“应用并继续”保存成功后会切到 Cast 步骤，避免文案和行为不一致。
-- ArtDirection 底部 prompt 编辑区、StoryboardR2V 主区/右侧检查栏增加响应式单列降级，避免窄屏固定双栏挤压。
+```text
+Script 解析
+        ↓
+Style 定调
+        ↓
+Cast 生成角色 / 场景 / 道具参考图，并保留 variants
+        ↓
+Storyboard 基于 Cast 资产生成镜头候选
+        ↓
+Assembly 选镜头、组装、混音、导出
+```
 
-待本次提交前继续验证：
+说明：剧本输入、AI 解析、角色 / 场景 / 道具 / 分镜草稿和 prompt 初稿都属于 Script 解析步骤内部的产物，不是插在 Style 前面的独立工作法阶段。文档中的主流程必须始终保持 LumenX 的五步顺序。
 
-- 相关 Studio/API 测试组合。
-- 全量 `bun run test`。
-- `git diff --check`。
-- touched-file 格式化检查。
+## 10. Issue 6：Cast 参考资产与 variants 闭环
 
-### 2026-07-01 18:10 Issue 5 风格校准
+下一阶段优先做 Cast 参考资产与 variants 闭环，而不是先做 Storyboard 单镜头图、视频任务队列或 Assembly 导出。
 
-本次根据反馈暂停继续发散设计，改为把当前 Studio 工作区视觉重新拉回 LumenX 工作画面基线。注意：这里不是新增 Issue 6，而是 Issue 5 已完成产物的风格纠偏。
+“一键批量生成基础资产图”只是入口之一，不是 Issue 6 的核心目标。Issue 6 的核心目标是：
 
-已完成：
+```text
+每个角色 / 场景 / 道具都有可持续迭代的参考资产池
+```
 
-- 重新对照 LumenX 源文件和共享组件：
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/shared/StepPageHeader.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/shared/WorkflowActionButton.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ScriptProcessor.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/ArtDirection.tsx`
-  - `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/StoryboardR2V.tsx`
-- 在 `web/src/app/(user)/studio/[seriesId]/page.tsx` 增加 Studio 局部 Ant Design dark theme，使 Button/Input/Tag 更接近 LumenX 的 dark glass 工作台，而不是当前项目默认黑白中性主题。
-- 把工作区主背景、侧栏、页面头部、结构侧栏、卡片、空状态、检查项从上一版手写暗色改为更贴近 LumenX 的 atelier token：
-  - base `#0c0b0e`
-  - surface `#131116`
-  - elevated `#181620`
-  - inset `#0a090c`
-  - primary `#34d8c4`
-  - accent `#ffa94d`
-  - foreground `#f2ede4`
-- 重做 `PipelineRail` 的视觉密度：LumenX 式 inset 侧栏、mono 小标签、低亮度状态说明、glass hover/active 和竖向流程线。
-- 重做 `StepPageHeader` / `StepPill` / `SidePanelHeader`，对齐 LumenX 的 `STEP 0N · NAME` 头部层级和 pill 信息胶囊。
-- 把主行动/次行动按钮改为 LumenX 风格 rounded-full frosted 按钮，优先减少 Ant 默认方角按钮带来的“不是同一个产品”的感觉。
-- 调整 `web/src/components/layout/app-top-nav.tsx`：具体 Studio 工作区 `/studio/:seriesId` 像 `/canvas/:id` 一样隐藏全局顶部导航，保留 `/studio` 项目库导航，避免工作台顶部被无限画布全局 chrome 打断。
-- 保持 Issue 5 业务行为不变：Script、ArtDirection、Cast、StoryboardR2V 轻量版的数据流和保存逻辑没有扩大范围。
+原因：
 
-当前已验证：
+- LumenX Studio 的工作流会在剧本分析和 Style 定调后，先形成 Cast 参考资产，再围绕这些资产推进分镜和镜头生成。
+- Cast 参考图是后续镜头一致性的前置条件。
+- variants 是抽卡、比较、回退和再选择的产品核心，不是缓存。
+- 这个切片可以验证 Studio 生成适配层、模型偏好、asset-first、候选引用、并发任务状态和 UI 回填。
+- 视频同时牵涉轮询、失败重试、参考图、耗时状态和导出链路，适合在 Cast 图片资产闭环稳定后再做。
 
-- `bun run typecheck`
-- `bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts'`
-- `bun run test`
-- `git diff --check`
-- touched-file prettier check
-- 已通过内置浏览器进入本地 `http://127.0.0.1:3002/studio/:seriesId` 并截图核验：顶部全局导航已隐藏，工作区进入沉浸式 LumenX dark glass 布局。
+### 10.1 目标链路
 
-### 2026-07-01 18:25 Issue 5 占位文案修正
+```text
+Script 解析完成，并得到 characters / scenes / props / 分镜草稿 + prompt 初稿
+        ↓
+Style 保存视觉基线
+        ↓
+Cast 展示基础资产清单、prompt 摘要、selected 图和 variants 状态
+        ↓
+用户点击“生成缺失参考图”
+        ↓
+为 pending 的角色 / 场景 / 道具创建并发图片生成任务
+        ↓
+每个任务读取 entity.prompt + 当前可见 Style，形成 effective prompt
+        ↓
+读取 Studio 项目 imageModel 偏好，未设置或不可用时 fallback
+        ↓
+复用当前 image request / ai-request / relay 接口
+        ↓
+生成返回的图片逐张创建 asset
+        ↓
+写入 StudioCharacter / StudioScene / StudioProp 的 image ref
+        ↓
+首次缺失项写为 selected，后续单项重生成写为 candidate
+        ↓
+Cast 卡片展示生成结果、候选数和任务状态
+        ↓
+用户可以进入单项 Workbench 继续生成 1 / 2 / 4 张候选
+        ↓
+用户可以把 candidate 设为主图，旧 selected 降级为 candidate
+```
 
-修正 Studio 工作区 `Assembly` 占位页旧文案。旧文案写着“下一轮会按 Issue 5 顺序继续迁移 Art Direction、Cast 和 StoryboardR2V 轻量版”，容易误导为 Issue 5 尚未完成。
+这里的“批量”指一次为多个 Cast 基础资产创建并发图片生成任务，不等于完整视频任务队列，也不等于 Assembly 导出队列。
 
-实际状态：
+### 10.2 Issue 6 切片
 
-- Issue 5 已完成 ScriptProcessor、ArtDirection、Cast、StoryboardR2V 轻量版。
-- `Assembly` 仍是占位，原因不是 Issue 5 未完成，而是视频组装、混音和导出预览属于后续闭环切片。
+#### 6.1 Cast 数据补正
 
-### 2026-07-02 07:40 Studio 生成设置面板
+- 给 `StudioCharacter`、`StudioScene`、`StudioProp` 增加 `prompt` 和 `generation`。
+- 剧本解析时生成基础资产 prompt 初稿。
+- prompt 初稿要参考实体名称、描述、类型和当前工作法需要的构图要求。
+- Style 独立保存，不强行不可见地塞进每个实体 prompt。
+- Cast 卡片展示 prompt 摘要、selected 图、candidate 数、失败状态和出现次数。
 
-本次补齐 Studio 工作区左侧底部的项目级生成设置入口。原先左侧底部只展示“当前模型 / 跟随全局配置”，但不能选择或保存模型；现在它会作为 Studio 项目的模型偏好设置入口。
+验收线：
 
-已完成：
+- 剧本解析后，Cast 中每个角色、场景、道具都有可见 prompt。
+- 保存结构草稿不会丢失 prompt 字段。
+- 重新解析或补充解析不静默覆盖用户已改 prompt。
 
-- 按 TDD 先补 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts`：
-  - `跟随全局配置` 会清空对应项目模型偏好。
-  - 具体模型会保存到 `series.modelPreferences.textModel / imageModel / videoModel`。
-  - 左侧摘要会按文本、图像、视频展示项目模型或全局 fallback。
-- 扩展 `web/src/app/(user)/studio/[seriesId]/studio-workspace-model.tsx`：
-  - 新增 `FOLLOW_GLOBAL_MODEL_VALUE`。
-  - 新增 `buildStudioModelPreferencesPatch()`。
-  - 新增 `buildStudioModelSummary()`。
-- 扩展 `web/src/app/(user)/studio/[seriesId]/page.tsx`：
-  - 左侧底部从只读“当前模型”升级为可点击的 LumenX dark glass 生成设置入口。
-  - 弹窗内可选择文本模型、生图模型、视频模型。
-  - 候选模型来自当前 `useConfigStore().config.textModels / imageModels / videoModels`，不引入 LumenX model catalog 作为运行时模型来源。
-  - 保存后写入当前 Studio 项目的 `modelPreferences`；选择“跟随全局配置”则不保存项目覆盖值。
-  - 保留“全局配置”入口，当前账号没有可用模型时可跳转到全局 AI 配置。
+#### 6.2 Cast 一键生成缺失参考图
 
-当前已验证：
+- 顶部按钮文案为“生成缺失参考图”。
+- 默认只生成没有 selected image 的角色、场景、道具。
+- 每项默认生成 1 张。
+- 并发执行，允许部分成功。
+- 成功图片先进入 asset，再写回 Studio `assetRefs`。
+- 首次缺失项成功后写为 selected image。
+- 失败项写入 `generation.lastImageError`。
 
-- `bun run test 'src/app/(user)/studio/[seriesId]/studio-workspace-model.test.ts'`
-- `bun run typecheck`
-- `bun run test`
-- `git diff --check`
-- touched-file prettier check
-- 浏览器视觉核验：在本地 `http://127.0.0.1:3002/studio/:seriesId` 创建临时 Studio 项目，确认具体工作区隐藏全局顶部导航；左侧底部显示生成设置摘要；点击后弹出 LumenX dark glass 风格模型设置弹窗；保存后弹窗关闭且仍显示 Global fallback；临时项目已删除。
+验收线：
 
-待本次提交前继续验证：
+- 成功项不受失败项影响。
+- 失败不会清空已有候选。
+- asset 创建失败时不写入 Studio ref。
+- asset 已创建但 Studio 回填失败时提示用户图片仍在素材库。
 
-- 提交前最终 `git status --short` 确认只提交本次相关文件，不包含用户已有文档/AGENTS 改动。
+#### 6.3 Cast 单项 Workbench
+
+- 点击角色、场景、道具打开单项 Workbench 或详情面板。
+- 可编辑基础 prompt。
+- 可看到 Style 是否参与生成。
+- 可看到 effective prompt preview 或关键摘要。
+- 可选择生成数量 1 / 2 / 4。
+- 单项重生成的新图默认追加为 candidate，不自动替换 selected。
+- 多次生成结果保留为 variants。
+
+验收线：
+
+- 用户能对单个角色、场景、道具反复生成和比较候选。
+- 旧候选保留。
+- 生成快照记录 prompt、style、model、count、aspectRatio。
+
+#### 6.4 Variants 选择和管理
+
+- candidate 可以设为主图。
+- 旧 selected 降级为 candidate。
+- 可以移除 Studio 候选关系。
+- 可以从素材库选择图片加入候选。
+- 可以查看每张候选的生成参数摘要。
+
+验收线：
+
+- 同一实体同一媒体类型最多一个 selected。
+- 未选候选不会因为切换主图而丢失。
+- 删除候选只解除 Studio 关系，不删除素材库 asset。
+
+### 10.3 产品规则
+
+- Cast 展示角色、场景、道具基础资产清单。
+- 每个基础资产都有用户可见、可编辑、可复制、可保存、可复用的生产 prompt。
+- 每个基础资产都可以有 selected reference image 和多个 candidate variants。
+- 初级用户可以直接一键生成缺失参考图，高级用户可以先检查和修改 prompt。
+- 剧本刚解析完成后的第一次一键生成中，角色、场景、道具默认都没有图片，全部属于 pending。
+- 全部基础资产已生成且没有 pending / failed 项时，顶部入口禁用或弱化，文案显示“参考图已生成”。
+- 不提供默认“重新生成全部”。
+- 后续新增角色、场景或道具后，顶部入口恢复为“生成缺失参考图”，只生成新增的 pending 项。
+- 部分失败时，顶部入口显示“重试失败项”，只重新提交 failed 或仍缺图的 pending 项，不重跑成功项。
+- 运行中离开 Studio 工作区时，可以提示“仍有图片正在生成，离开后当前进度不会继续追踪”。
+- 第一版只持久化生成结果状态，不持久化完整运行中任务队列。
+
+### 10.4 建议 Interface
+
+```text
+generateCastReferences(input)
+  输入：
+    - repository
+    - seriesId / episodeId
+    - target kind: character / scene / prop
+    - target ids 或 allMissing / failedOnly
+    - 当前 StudioSeries / StudioEpisode
+    - 当前 AI config
+    - asset 创建函数
+    - 可测试替换的图片请求函数
+    - count: 1 / 2 / 4
+
+  输出：
+    - per-target result
+    - 新创建的 assets
+    - 写入对应 StudioCharacter / StudioScene / StudioProp 的 assetRefs
+    - 更新后的 episode / series
+```
+
+Interface 应隐藏：
+
+- imageModel fallback 和可用性校验。
+- effective prompt 构建和快照。
+- `/images/generations` relay 调用。
+- 生成结果转 asset。
+- Studio entity `assetRefs` 回填。
+- selected / candidate 切换。
+- 失败时不覆盖旧候选的保护逻辑。
+
+## 11. Issue 7：Storyboard 镜头图片候选闭环
+
+Issue 7 必须建立在 Cast 参考资产可生成、可选择、可重生之后。
+
+正确链路：
+
+```text
+StudioShot.prompt
+        +
+Style
+        +
+角色 selected reference image
+        +
+场景 selected reference image
+        +
+道具 selected reference image
+        ↓
+镜头图片候选 variants
+        ↓
+shot selected image / candidate images
+```
+
+产品规则：
+
+- 分镜卡展示 shot prompt。
+- 分镜卡展示所引用的角色、场景、道具参考图状态。
+- 缺少关键 Cast selected 图时，生成入口提示一致性风险。
+- 单镜头默认生成 1 张。
+- 可选 2 / 4 张候选。
+- 空镜头首次单张生成可以自动成为 selected image。
+- 后续重生成默认追加 candidate。
+- 用户可以切换 shot selected image。
+
+不要先做：
+
+- 多镜头视频队列。
+- 完整 R2V 任务队列。
+- Assembly 导出。
+
+## 12. Issue 8：候选管理增强
+
+Cast 和 Storyboard 都有候选后，再补统一候选管理能力：
+
+- 重新生成。
+- 移除 Studio 候选关系。
+- 从素材库选择候选。
+- 上传图片作为候选。
+- 候选批次记录。
+- 生成参数摘要展示。
+- 收藏、标签、归档等素材库增强。
+
+候选管理不要提前到 Issue 6 之前做成空架子。
+
+## 13. Issue 9：Studio 与 Canvas 打通
+
+Studio 与 Canvas 的打通建立在 asset-first 上：
+
+- 角色、场景、道具、镜头可以发送到 Canvas 自由编辑。
+- Canvas 结果通过 asset ref 回填 Studio。
+- 回填时进入对应实体或 shot 的 candidate refs。
+- 用户可以再设为 selected。
+
+Canvas 是自由创作空间，不替代 Studio 的五步生产顺序。
+
+## 14. Issue 10-12：视频、任务队列和 Assembly
+
+Issue 10：单镜头视频候选生成
+
+- 基于已选镜头图或参考图生成视频候选。
+- 先做单镜头，不急着批量队列。
+- 视频候选也进入 asset，再写 Studio ref。
+
+Issue 11：轻量任务队列
+
+- 多镜头生成。
+- 状态追踪。
+- 失败重试。
+- 结果回填。
+- 第一版不需要完整后台恢复和复杂暂停继续。
+
+Issue 12：Assembly / 组装 / 预览 / 导出
+
+- 镜头排序。
+- 最终 take 选择。
+- 基础时间线。
+- 配音、音乐、字幕和最终导出视产品范围补齐。
+
+Assembly 的目标是 LumenX 的最终选择和组装阶段，不是单个导出按钮。
+
+## 15. 多集和系列能力
+
+当前数据模型已经预留 `StudioSeries` 和 `StudioEpisode`，但第一阶段 UI 只暴露单项目单集。这个方向保持不变。
+
+后续再迁移：
+
+- `SeriesDetailPage`
+- `EpisodeMiniList`
+- 多集切换
+- 跨集共享角色、场景、道具和 Style
+- Reconcile
+- 上一集回顾
+- 系列级任务、资产、导出结果和生成历史
+
+这些能力重要，但不应抢在 Cast variants 和 Storyboard 候选闭环之前。
+
+## 16. LumenX 对照
+
+后续 Studio 流程决策默认先参考 LumenX 已批准设计文档和源码，不再把 LumenX 已经回答过的问题逐项重新追问。
+
+对照 LumenX 时，优先找等价行为，再决定当前项目的适配写法。只有当 LumenX 的实现依赖 Python 后端、OSS 路径、model catalog、不可见 prompt 拼接或其他当前项目明确不迁移的边界时，才进行本地改写。
+
+主要依据：
+
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/docs/design/r2v-workflow-v2.md`
+  - R2V workflow 是 5 步：`Script · Style · Cast · Storyboard · Assembly`。
+  - Cast 是本集视角，按角色、场景、道具三段平铺，每张卡展示缩略图、名称、出场次数和状态徽。
+  - 角色参考图采用 single master sheet，`reference_sheet` 是新主字段。
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/docs/design/r2v-workflow-v3-unified.md`
+  - Unified 5-step workflow 保留 Series / Cast / Reconcile 等已确认结构。
+  - Assembly 是最终合成、混音和导出阶段。
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/Cast.tsx`
+  - Cast 从 `currentProject.characters / scenes / props` 聚合基础资产，并根据是否有参考图显示 ready / pending。
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/cast/CastWorkbenchModal.tsx`
+  - 单个角色、场景、道具可以进入 workbench 生成、迭代、选择参考图。
+  - 生成数量为 1 / 2 / 4。
+  - 变体 gallery 保留多次生成结果。
+  - prompt 编辑、Style 应用和最终 prompt preview 是可见工作流。
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/frontend/src/components/modules/AssetGrid.tsx`
+  - 旧流程存在 `generateAssets` / `generateAll` 风格的全量基础资产生成入口。
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/src/apps/comic_gen/models.py`
+  - 图片变体记录 `prompt_used`，资产容器记录 selected id 和 variants。
+- `/Users/a1/Desktop/无限画布项目汇总/lumenx/src/apps/comic_gen/assets.py`
+  - 角色 reference sheet 生成成功后追加 variant，首次没有 selected 时设为 selected。
+  - 场景和道具生成也写入 variants 并维护 selected。
+
+迁移映射：
+
+- LumenX 的 `reference_sheet` / `image_asset` 容器语义映射到当前项目统一的 `assetRefs`。
+- LumenX 的媒体文件先进入当前项目本地素材库 asset，再写入 Studio 引用。
+- LumenX 的 `prompt_used` 映射为 `StudioAssetRef.metadata.promptSnapshot`。
+- LumenX 的 variants 映射为多个 `role: "candidate"` refs。
+- LumenX 的 selected id 映射为唯一 `role: "selected"` ref。
+- 当前可编辑生产输入保留在 `entity.prompt` 或 `shot.prompt`。
+- LumenX 中 Style 可以拼接进生成；当前项目必须让 Style 参与生成的事实可见，并保存 `styleSnapshot` / `effectivePromptSnapshot`。
+- LumenX 对 scene / prop 的单张重生成有自动 selected 行为；当前项目统一采用更保守规则：首次缺失项生成直接 selected，后续单项重生成默认 candidate，用户手动切换 selected。
+
+## 17. 测试建议
+
+优先测试 Module Interface 和用户可观察行为，不测底层 IndexedDB 细节。
+
+- `studio-workspace-model.test.ts`
+  - Cast selected 图派生。
+  - candidate 数量。
+  - 失败状态。
+  - 顶部按钮文案。
+  - Storyboard 生成前检查。
+- `studio-generation.test.ts`
+  - Cast 生成读取显性 prompt 和 Style。
+  - 记录 effective prompt 快照。
+  - 模型偏好 fallback。
+  - asset 创建。
+  - entity 回填。
+  - 失败路径不覆盖候选。
+  - 首次缺失项 selected，后续重生成 candidate。
+- `studio-local.test.ts`
+  - repository 写入角色、场景、道具 candidate ref。
+  - candidate 设为 selected。
+  - 旧 selected 降级 candidate。
+- `asset-references.test.ts`
+  - Studio 角色、场景、道具和镜头 candidate / selected image 都能阻止 asset 删除。
+- 必要时补页面级测试：
+  - 点击“生成缺失参考图”后任务状态和候选展示。
+  - 失败时提示且不清空旧候选。
+
+## 18. 实践守则
+
+- 以 LumenX 五步生产行为为产品真相。
+- 先补 Cast variants，再做 Storyboard 候选，再做视频和 Assembly。
+- Style 必须影响 Cast / Storyboard，但必须以可见 effective prompt 或生成快照体现。
+- 每次生成出的媒体都先成为 asset，再写 Studio 或 Canvas 引用。
+- 未选候选不是缓存，不应自动丢弃。
+- AI 失败不能阻断手工编辑。
+- 页面只做展示、触发和局部 UI 状态。
+- prompt 初稿生成、Style 参与、relay 调用、asset 创建、repository 回填和 variants 规则要放进可测试的 Module Interface。
+- 能复用当前项目已有服务就复用，不复制 LumenX 的 API 假设。
+- LumenX 组件做适配性移植，保留工作流、交互结构和视觉质感，但替换路由、状态、存储、模型和服务边界。
+- Studio 流程细节优先查 LumenX 已批准设计文档和源码；只有源项目做法与当前项目边界冲突时再单独决策。
+- 不为假想的完整 Studio 后端提前设计复杂抽象。
+- 不让完整视频队列、Assembly 导出、多集 Reconcile 抢在 Cast 和 Storyboard 基础闭环之前。
