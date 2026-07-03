@@ -3,9 +3,10 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
-import type { StudioAssetRef, StudioEpisodePatch, StudioShot, StudioCharacter, StudioProp, StudioScene, createStudioRepository, StudioEpisode, StudioSeries } from "@/services/studio-local";
+import type { StudioAssetRef, StudioEpisodePatch, StudioShot, StudioShotReferences, StudioCharacter, StudioProp, StudioScene, createStudioRepository, StudioEpisode, StudioSeries } from "@/services/studio-local";
 import type { Asset } from "@/stores/use-asset-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import type { ReferenceImage } from "@/types/image";
 
 export type StudioChatMessage = {
     role: "system" | "user" | "assistant";
@@ -46,6 +47,7 @@ export type StudioCastTargetKind = "character" | "scene" | "prop";
 export type GenerateCastTarget = { mode: "allMissing" } | { mode: "failedOnly" } | { mode: "ids"; kind: StudioCastTargetKind; ids: string[] };
 
 export type StudioImageRequester = (config: AiConfig, prompt: string) => Promise<Array<{ id: string; dataUrl: string }>>;
+export type StudioImageEditRequester = (config: AiConfig, prompt: string, references: ReferenceImage[]) => Promise<Array<{ id: string; dataUrl: string }>>;
 
 export type StudioImageStorage = (dataUrl: string) => Promise<{
     url: string;
@@ -113,6 +115,45 @@ export type UpdateCastEntityPromptInput = {
     prompt: string;
 };
 
+export type UpdateShotPromptInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    shotId: string;
+    prompt: string;
+};
+
+export type UpdateShotReferencesInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    shotId: string;
+    references: StudioShotReferences;
+};
+
+export type GenerateStoryboardShotImagesInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    shotId: string;
+    config: AiConfig;
+    assets: Asset[];
+    count: 1 | 2 | 4;
+    allowNoReferences?: boolean;
+    addAsset: StudioAssetCreator;
+    requestEdit?: StudioImageEditRequester;
+    requestGeneration?: StudioImageRequester;
+    storeImage?: StudioImageStorage;
+    now?: () => string;
+};
+
+export type GenerateStoryboardShotImagesResult = {
+    series: StudioSeries;
+    episode: StudioEpisode;
+    createdAssetIds: string[];
+    selectedAssetId?: string;
+};
+
 type ChatCompletionPayload = {
     model: string;
     messages: StudioChatMessage[];
@@ -121,15 +162,28 @@ type ChatCompletionPayload = {
 };
 
 const parsedItemSchema = z.object({
+    id: z.string().trim().optional(),
     name: z.string().trim().min(1),
     description: z.string().trim().default(""),
     prompt: z.string().trim().optional(),
 });
 
 const parsedShotSchema = z.object({
+    id: z.string().trim().optional(),
     title: z.string().trim().min(1),
     description: z.string().trim().min(1),
     dialogue: z.string().trim().optional(),
+    prompt: z.string().trim().optional(),
+    references: z
+        .object({
+            characters: z.array(z.string().trim()).optional(),
+            scenes: z.array(z.string().trim()).optional(),
+            props: z.array(z.string().trim()).optional(),
+            characterIds: z.array(z.string().trim()).optional(),
+            sceneIds: z.array(z.string().trim()).optional(),
+            propIds: z.array(z.string().trim()).optional(),
+        })
+        .optional(),
 });
 
 const scriptParseSchema = z.object({
@@ -194,17 +248,20 @@ export async function parseScript({ script, config, requestChat = requestStudioC
     };
 }
 
-export function normalizeScriptStructure(payload: unknown): StudioScriptStructure {
+export function normalizeScriptStructure(payload: unknown, options: { previousEpisode?: StudioEpisode } = {}): StudioScriptStructure {
     const validated = scriptParseSchema.safeParse(payload);
     if (!validated.success) {
         throw new StudioGenerationError("AI 返回内容无法识别为 Studio 剧本结构，请保留剧本并手动编辑或重新解析。", { cause: validated.error });
     }
+    const characters = validated.data.characters.map((item) => toStudioCharacter(item, options.previousEpisode));
+    const scenes = validated.data.scenes.map((item) => toStudioScene(item, options.previousEpisode));
+    const props = validated.data.props.map((item) => toStudioProp(item, options.previousEpisode));
 
     return {
-        characters: validated.data.characters.map(toStudioCharacter),
-        scenes: validated.data.scenes.map(toStudioScene),
-        props: validated.data.props.map(toStudioProp),
-        shots: validated.data.shotDrafts.map(toStudioShot),
+        characters,
+        scenes,
+        props,
+        shots: validated.data.shotDrafts.map((shot, index) => toStudioShot(shot, index, { characters, scenes, props, previousEpisode: options.previousEpisode })),
     };
 }
 
@@ -404,6 +461,126 @@ export async function updateCastEntityPrompt(input: UpdateCastEntityPromptInput)
     return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, { ...entity, prompt }));
 }
 
+export async function updateShotPrompt(input: UpdateShotPromptInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const prompt = input.prompt.trim();
+    if (!prompt) throw new StudioGenerationError("Shot prompt 不能为空。");
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const shot = episode.shots.find((item) => item.id === input.shotId);
+    if (!shot) throw new StudioGenerationError("镜头不存在。");
+
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, {
+        shots: episode.shots.map((item) => (item.id === input.shotId ? { ...item, prompt } : item)),
+    });
+}
+
+export async function updateShotReferences(input: UpdateShotReferencesInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const shot = episode.shots.find((item) => item.id === input.shotId);
+    if (!shot) throw new StudioGenerationError("镜头不存在。");
+    const references = normalizeShotReferences(input.references, episode);
+
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, {
+        shots: episode.shots.map((item) =>
+            item.id === input.shotId
+                ? {
+                      ...item,
+                      metadata: {
+                          ...item.metadata,
+                          references,
+                      },
+                  }
+                : item,
+        ),
+    });
+}
+
+export async function generateStoryboardShotImages(input: GenerateStoryboardShotImagesInput): Promise<GenerateStoryboardShotImagesResult> {
+    const requestEdit = input.requestEdit ?? defaultRequestEdit;
+    const requestGeneration = input.requestGeneration ?? defaultRequestImages;
+    const storeImage = input.storeImage ?? defaultStoreImage;
+    const now = input.now ?? (() => new Date().toISOString());
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const shot = episode.shots.find((item) => item.id === input.shotId);
+    if (!shot) throw new StudioGenerationError("镜头不存在。");
+
+    const artDirection = readStudioArtDirection(episode);
+    if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
+    const model = series.modelPreferences.imageModel || input.config.imageModel;
+    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+
+    const snapshot = buildStoryboardGenerationSnapshot({ shot, artDirection, model, count: input.count, createdAt: now() });
+    const references = collectStoryboardReferenceImages(episode, shot, input.assets);
+    if (!references.length && !input.allowNoReferences) throw new StudioGenerationError("缺少 Cast selected reference images。请先补齐显式引用和主参考图，或明确允许无参考生成。");
+
+    const images = references.length
+        ? await requestEdit({ ...input.config, model, imageModel: model, count: String(input.count), size: snapshot.aspectRatio }, snapshot.effectivePrompt, references)
+        : await requestGeneration({ ...input.config, model, imageModel: model, count: String(input.count), size: snapshot.aspectRatio }, snapshot.effectivePrompt);
+    if (!images.length) throw new StudioGenerationError("接口没有返回图片");
+
+    const batchId = nanoid();
+    const refs: StudioAssetRef[] = [];
+    const createdAssetIds: string[] = [];
+    for (const [index, image] of images.entries()) {
+        const stored = await storeImage(image.dataUrl);
+        const metadata = {
+            source: "studio-storyboard",
+            seriesId: input.seriesId,
+            episodeId: input.episodeId,
+            shotId: shot.id,
+            shotTitle: shot.title,
+            prompt: snapshot.prompt,
+            style: artDirection.name,
+            stylePrompt: artDirection.positivePrompt,
+            effectivePrompt: snapshot.effectivePrompt,
+            negativePrompt: snapshot.negativePrompt,
+            model,
+            referenceAssetIds: references.map((reference) => reference.id),
+            count: input.count,
+            aspectRatio: snapshot.aspectRatio,
+            batchId,
+            createdAt: snapshot.createdAt,
+        };
+        const assetId = input.addAsset({
+            kind: "image",
+            title: `${shot.title} 分镜图 ${index + 1}`,
+            coverUrl: stored.url,
+            tags: ["Studio", "Storyboard"],
+            source: "Studio Storyboard",
+            data: {
+                dataUrl: stored.url,
+                storageKey: stored.storageKey,
+                width: stored.width,
+                height: stored.height,
+                bytes: stored.bytes,
+                mimeType: stored.mimeType,
+            },
+            metadata,
+        });
+        createdAssetIds.push(assetId);
+        refs.push({
+            assetId,
+            kind: "image",
+            note: "Studio Storyboard 分镜候选图",
+            metadata: {
+                ...metadata,
+                generatedAt: snapshot.createdAt,
+            },
+        });
+    }
+
+    const updatedShot = appendGeneratedShotImageRefs(shot, refs, snapshot);
+    const updated = await input.repository.updateEpisode(input.seriesId, input.episodeId, {
+        shots: episode.shots.map((item) => (item.id === shot.id ? updatedShot : item)),
+    });
+    return { ...updated, createdAssetIds, selectedAssetId: getSelectedImageRef(updatedShot)?.assetId };
+}
+
 type StudioCastEntity = StudioCharacter | StudioScene | StudioProp;
 
 type StudioArtDirectionSnapshot = {
@@ -426,9 +603,16 @@ type StudioCastGenerationSnapshot = {
     lastImageError?: string;
 };
 
+type StudioStoryboardGenerationSnapshot = StudioCastGenerationSnapshot;
+
 async function defaultRequestImages(config: AiConfig, prompt: string) {
     const { requestGeneration } = await import("@/services/api/image");
     return requestGeneration(config, prompt);
+}
+
+async function defaultRequestEdit(config: AiConfig, prompt: string, references: ReferenceImage[]) {
+    const { requestEdit } = await import("@/services/api/image");
+    return requestEdit(config, prompt, references);
 }
 
 async function defaultStoreImage(dataUrl: string) {
@@ -485,6 +669,22 @@ function patchEpisodeCastEntity(episode: StudioEpisode, kind: StudioCastTargetKi
     return { props: episode.props.map((item) => (item.id === entity.id ? (entity as StudioProp) : item)) };
 }
 
+function normalizeShotReferences(references: StudioShotReferences, episode: StudioEpisode): StudioShotReferences {
+    return {
+        characterIds: normalizeExistingIds(references.characterIds, episode.characters, "镜头引用包含不存在的角色"),
+        sceneIds: normalizeExistingIds(references.sceneIds, episode.scenes, "镜头引用包含不存在的场景"),
+        propIds: normalizeExistingIds(references.propIds, episode.props, "镜头引用包含不存在的道具"),
+    };
+}
+
+function normalizeExistingIds(ids: string[], entities: Array<{ id: string }>, errorMessage: string) {
+    const requested = new Set(ids.map((id) => id.trim()).filter(Boolean));
+    const entityIds = new Set(entities.map((entity) => entity.id));
+    const invalid = [...requested].find((id) => !entityIds.has(id));
+    if (invalid) throw new StudioGenerationError(errorMessage);
+    return entities.map((entity) => entity.id).filter((id) => requested.has(id));
+}
+
 function buildCastGenerationSnapshot(input: { kind: StudioCastTargetKind; entity: StudioCastEntity; artDirection: StudioArtDirectionSnapshot; model: string; count: 1 | 2 | 4; createdAt: string }): StudioCastGenerationSnapshot {
     const prompt = input.entity.prompt || normalizeCastPrompt(input.kind, input.entity);
     const castPrompt = buildCastReferencePrompt(input.kind, prompt);
@@ -500,6 +700,61 @@ function buildCastGenerationSnapshot(input: { kind: StudioCastTargetKind; entity
         aspectRatio: castKindAspectRatio(input.kind),
         createdAt: input.createdAt,
     };
+}
+
+function buildStoryboardGenerationSnapshot(input: { shot: StudioShot; artDirection: StudioArtDirectionSnapshot; model: string; count: 1 | 2 | 4; createdAt: string }): StudioStoryboardGenerationSnapshot {
+    const prompt = readShotPrompt(input.shot);
+    const effectivePrompt = `${prompt}\n\nStyle baseline:\n${input.artDirection.positivePrompt}`;
+    return {
+        prompt,
+        style: input.artDirection.name,
+        stylePrompt: input.artDirection.positivePrompt,
+        effectivePrompt,
+        negativePrompt: [input.artDirection.negativePrompt, "text, labels, watermark, UI overlay, panel borders, inconsistent character identity, distorted anatomy, low detail"].filter(Boolean).join(", "),
+        model: input.model,
+        count: input.count,
+        aspectRatio: "16:9",
+        createdAt: input.createdAt,
+    };
+}
+
+function readShotPrompt(shot: StudioShot) {
+    const prompt = shot.prompt?.trim();
+    if (prompt) return prompt;
+    return buildShotPromptFallback(shot);
+}
+
+function buildShotPromptFallback(shot: Pick<StudioShot, "description" | "dialogue">) {
+    return [shot.description.trim(), shot.dialogue?.trim() ? `对白：${shot.dialogue.trim()}` : ""].filter(Boolean).join("\n");
+}
+
+function readShotReferences(shot: StudioShot): StudioShotReferences {
+    return {
+        characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
+        sceneIds: Array.isArray(shot.metadata?.references?.sceneIds) ? shot.metadata.references.sceneIds : [],
+        propIds: Array.isArray(shot.metadata?.references?.propIds) ? shot.metadata.references.propIds : [],
+    };
+}
+
+function collectStoryboardReferenceImages(episode: StudioEpisode, shot: StudioShot, assets: Asset[]): ReferenceImage[] {
+    const assetMap = new Map(assets.filter((asset) => asset.kind === "image").map((asset) => [asset.id, asset]));
+    const refs = readShotReferences(shot);
+    const entities = [...episode.characters.filter((entity) => refs.characterIds.includes(entity.id)), ...episode.scenes.filter((entity) => refs.sceneIds.includes(entity.id)), ...episode.props.filter((entity) => refs.propIds.includes(entity.id))];
+    const images: ReferenceImage[] = [];
+    for (const entity of entities) {
+        const selected = getSelectedImageRef(entity);
+        const asset = selected ? assetMap.get(selected.assetId) : undefined;
+        if (!asset || asset.kind !== "image") continue;
+        images.push({
+            id: asset.id,
+            name: asset.title,
+            dataUrl: asset.data.dataUrl,
+            url: asset.data.dataUrl,
+            storageKey: asset.data.storageKey,
+            type: asset.data.mimeType,
+        });
+    }
+    return images;
 }
 
 export function buildCastReferencePrompt(kind: StudioCastTargetKind, prompt: string) {
@@ -554,6 +809,34 @@ function appendGeneratedImageRefs(entity: StudioCastEntity, refs: StudioAssetRef
         },
         { ...snapshot, status: "completed" },
     );
+}
+
+function appendGeneratedShotImageRefs(shot: StudioShot, refs: StudioAssetRef[], snapshot: StudioStoryboardGenerationSnapshot): StudioShot {
+    const hasSelected = Boolean(getSelectedImageRef(shot));
+    const nextRefs = [...shot.assetRefs];
+    refs.forEach((ref, index) => {
+        if (nextRefs.some((item) => item.kind === "image" && item.assetId === ref.assetId)) return;
+        nextRefs.push({ ...ref, role: !hasSelected && index === 0 ? "selected" : "candidate" });
+    });
+    return {
+        ...shot,
+        assetRefs: normalizeSingleSelectedImageRef(nextRefs),
+        generation: {
+            ...shot.generation,
+            image: {
+                status: "completed",
+                lastPrompt: snapshot.prompt,
+                lastStyle: snapshot.style,
+                lastStylePrompt: snapshot.stylePrompt,
+                lastEffectivePrompt: snapshot.effectivePrompt,
+                lastNegativePrompt: snapshot.negativePrompt,
+                lastModel: snapshot.model,
+                lastCount: snapshot.count,
+                lastAspectRatio: snapshot.aspectRatio,
+                lastGeneratedAt: snapshot.createdAt,
+            },
+        },
+    };
 }
 
 function withCastGenerationImage(entity: StudioCastEntity, snapshot: StudioCastGenerationSnapshot): StudioCastEntity {
@@ -655,7 +938,7 @@ function upsertLibraryImageAssetRef(
     );
 }
 
-function getSelectedImageRef(entity: Pick<StudioCastEntity, "assetRefs">) {
+function getSelectedImageRef(entity: Pick<StudioCastEntity | StudioShot, "assetRefs">) {
     return entity.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected");
 }
 
@@ -701,7 +984,9 @@ function buildScriptParseMessages(script: string): StudioChatMessage[] {
                 "JSON 字段必须是 characters、scenes、props、shotDrafts。",
                 "characters/scenes/props 每项包含 name、description、prompt。",
                 "prompt 是用于生成该角色、场景或道具参考图的图像提示词初稿，不要包含全局画风。",
-                "shotDrafts 每项包含 title、description，可选 dialogue。",
+                "shotDrafts 每项包含 title、description、prompt、references，可选 dialogue。",
+                "shotDrafts.prompt 是用于生成该镜头图片的提示词初稿，不要包含全局画风。",
+                "shotDrafts.references 使用 characters/scenes/props 数组列出本次 JSON 中已经出现的角色、场景、道具名称。",
                 "分镜按叙事顺序拆分，保持简洁但可直接进入分镜编辑。",
             ].join("\n"),
         },
@@ -730,16 +1015,22 @@ function extractJsonObject(value: string) {
     return value.slice(start, end + 1);
 }
 
-function toStudioCharacter(item: z.infer<typeof parsedItemSchema>): StudioCharacter {
-    return { id: nanoid(), name: item.name, description: item.description, prompt: normalizeCastPrompt("character", item), assetRefs: [] };
+function toStudioCharacter(item: z.infer<typeof parsedItemSchema>, episode?: StudioEpisode): StudioCharacter {
+    return { id: resolveEntityId(item, episode?.characters), name: item.name, description: item.description, prompt: normalizeCastPrompt("character", item), assetRefs: [] };
 }
 
-function toStudioScene(item: z.infer<typeof parsedItemSchema>): StudioScene {
-    return { id: nanoid(), name: item.name, description: item.description, prompt: normalizeCastPrompt("scene", item), assetRefs: [] };
+function toStudioScene(item: z.infer<typeof parsedItemSchema>, episode?: StudioEpisode): StudioScene {
+    return { id: resolveEntityId(item, episode?.scenes), name: item.name, description: item.description, prompt: normalizeCastPrompt("scene", item), assetRefs: [] };
 }
 
-function toStudioProp(item: z.infer<typeof parsedItemSchema>): StudioProp {
-    return { id: nanoid(), name: item.name, description: item.description, prompt: normalizeCastPrompt("prop", item), assetRefs: [] };
+function toStudioProp(item: z.infer<typeof parsedItemSchema>, episode?: StudioEpisode): StudioProp {
+    return { id: resolveEntityId(item, episode?.props), name: item.name, description: item.description, prompt: normalizeCastPrompt("prop", item), assetRefs: [] };
+}
+
+function resolveEntityId(item: z.infer<typeof parsedItemSchema>, previousItems: Array<{ id: string; name: string }> | undefined) {
+    const explicitId = item.id?.trim();
+    if (explicitId) return explicitId;
+    return previousItems?.find((previous) => previous.name === item.name)?.id ?? nanoid();
 }
 
 function normalizeCastPrompt(kind: "character" | "scene" | "prop", item: z.infer<typeof parsedItemSchema>) {
@@ -754,13 +1045,60 @@ function normalizeCastPrompt(kind: "character" | "scene" | "prop", item: z.infer
     return `${base}，道具参考图，清晰形态、材质、尺寸感和细节。`;
 }
 
-function toStudioShot(item: z.infer<typeof parsedShotSchema>, index: number): StudioShot {
+function toStudioShot(
+    item: z.infer<typeof parsedShotSchema>,
+    index: number,
+    context: {
+        characters: StudioCharacter[];
+        scenes: StudioScene[];
+        props: StudioProp[];
+        previousEpisode?: StudioEpisode;
+    },
+): StudioShot {
+    const previousShot = findPreviousShot(item, index, context.previousEpisode);
+    const prompt = item.prompt?.trim() || previousShot?.prompt?.trim() || buildShotPromptFallback(item);
+    const references = item.references ? normalizeParsedShotReferences(item.references, context) : (previousShot?.metadata?.references ?? { characterIds: [], sceneIds: [], propIds: [] });
     return {
-        id: nanoid(),
+        id: item.id?.trim() || previousShot?.id || nanoid(),
         title: item.title,
         order: index + 1,
         description: item.description,
         dialogue: item.dialogue,
+        prompt,
         assetRefs: [],
+        metadata: {
+            references,
+        },
     };
+}
+
+function findPreviousShot(item: z.infer<typeof parsedShotSchema>, index: number, episode?: StudioEpisode) {
+    if (!episode) return undefined;
+    const id = item.id?.trim();
+    if (id) {
+        const byId = episode.shots.find((shot) => shot.id === id);
+        if (byId) return byId;
+    }
+    return episode.shots[index]?.title === item.title ? episode.shots[index] : undefined;
+}
+
+function normalizeParsedShotReferences(
+    references: NonNullable<z.infer<typeof parsedShotSchema>["references"]>,
+    context: {
+        characters: StudioCharacter[];
+        scenes: StudioScene[];
+        props: StudioProp[];
+    },
+): StudioShotReferences {
+    return {
+        characterIds: resolveParsedReferenceIds(references.characterIds, references.characters, context.characters),
+        sceneIds: resolveParsedReferenceIds(references.sceneIds, references.scenes, context.scenes),
+        propIds: resolveParsedReferenceIds(references.propIds, references.props, context.props),
+    };
+}
+
+function resolveParsedReferenceIds(explicitIds: string[] | undefined, names: string[] | undefined, entities: Array<{ id: string; name: string }>) {
+    const ids = new Set((explicitIds ?? []).map((id) => id.trim()).filter(Boolean));
+    const namesSet = new Set((names ?? []).map((name) => name.trim()).filter(Boolean));
+    return entities.filter((entity) => ids.has(entity.id) || namesSet.has(entity.name)).map((entity) => entity.id);
 }

@@ -359,6 +359,10 @@ StudioAssetRef.metadata.promptSnapshot
 - `StudioProp.prompt`
 - `StudioShot.prompt`
 
+这些 prompt 是 AI 解析或用户编辑得到的生产输入。AI 生成的初稿不应被视为最终可用内容，用户编辑后的 `StudioShot.prompt` 是 Storyboard 生成的权威输入。
+
+`StudioShot.prompt` 和 `StudioShot.metadata.references` 是相邻但独立的控制面。修改镜头 prompt 不自动重算角色、场景或道具引用；引用只能通过结构化引用入口修改，避免把名称匹配作为隐式兜底重新引入。
+
 Style 也必须参与后续生成，但要透明：
 
 ```text
@@ -693,7 +697,9 @@ shot selected image / candidate images
 产品规则：
 
 - 分镜卡展示 shot prompt。
-- 分镜卡展示所引用的角色、场景、道具参考图状态。
+- 分镜卡展示 shot 显式引用的角色、场景、道具参考图状态。
+- Issue 7 不使用名称匹配作为默认引用机制；Script 解析和结构草稿保存应维护 `StudioShot.metadata.references`。
+- Issue 7 第一版应在 Shot Workbench 提供最小引用编辑入口，允许用户手工维护角色、场景、道具引用。
 - 缺少关键 Cast selected 图时，生成入口提示一致性风险。
 - 单镜头默认生成 1 张。
 - 可选 2 / 4 张候选。

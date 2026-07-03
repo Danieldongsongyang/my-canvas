@@ -96,7 +96,9 @@ describe("studio workspace model", () => {
                     characters: [{ id: "c1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] }],
                     scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店", assetRefs: [] }],
                     props: [{ id: "p1", name: "贝壳", description: "发光", prompt: "发光贝壳道具", assetRefs: [] }],
-                    shots: [{ id: "shot-1", title: "开场", order: 1, description: "便利店亮灯", dialogue: "又是这个点。", assetRefs: [] }],
+                    shots: [
+                        { id: "shot-1", title: "开场", order: 1, description: "便利店亮灯", dialogue: "又是这个点。", prompt: "wide storyboard frame", assetRefs: [], metadata: { references: { characterIds: ["c1"], sceneIds: ["s1"], propIds: ["p1"] } } },
+                    ],
                 }),
             ),
         ).toBe(
@@ -105,7 +107,7 @@ describe("studio workspace model", () => {
                     characters: [{ name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图" }],
                     scenes: [{ name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店" }],
                     props: [{ name: "贝壳", description: "发光", prompt: "发光贝壳道具" }],
-                    shotDrafts: [{ title: "开场", description: "便利店亮灯", dialogue: "又是这个点。" }],
+                    shotDrafts: [{ id: "shot-1", title: "开场", description: "便利店亮灯", dialogue: "又是这个点。", prompt: "wide storyboard frame", references: { characterIds: ["c1"], sceneIds: ["s1"], propIds: ["p1"] } }],
                 },
                 null,
                 2,
@@ -218,14 +220,14 @@ describe("studio workspace model", () => {
             buildStoryboardCards(
                 episode({
                     shots: [
-                        { id: "shot-2", title: "第二镜", order: 2, description: "青蛇回头", dialogue: "你终于来了。", assetRefs: [] },
+                        { id: "shot-2", title: "第二镜", order: 2, description: "青蛇回头", dialogue: "你终于来了。", prompt: "用户精修 prompt", assetRefs: [], metadata: { references: { characterIds: ["c1"], sceneIds: [], propIds: [] } } },
                         { id: "shot-1", title: "第一镜", order: 1, description: "雨落在玻璃门上", assetRefs: [] },
                     ],
                 }),
             ),
         ).toMatchObject([
-            { id: "shot-1", title: "第一镜", order: 1, prompt: "雨落在玻璃门上", hasDialogue: false },
-            { id: "shot-2", title: "第二镜", order: 2, prompt: "青蛇回头\n对白：你终于来了。", hasDialogue: true },
+            { id: "shot-1", title: "第一镜", order: 1, prompt: "雨落在玻璃门上", hasDialogue: false, referenceCount: 0, hasExplicitReferences: false, hasReadyReferences: false },
+            { id: "shot-2", title: "第二镜", order: 2, prompt: "用户精修 prompt", hasDialogue: true, referenceCount: 1, hasExplicitReferences: true, hasReadyReferences: false },
         ]);
     });
 });

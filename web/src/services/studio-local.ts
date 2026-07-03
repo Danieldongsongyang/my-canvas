@@ -10,6 +10,12 @@ export type StudioAssetRef = {
     metadata?: Record<string, unknown>;
 };
 
+export type StudioShotReferences = {
+    characterIds: string[];
+    sceneIds: string[];
+    propIds: string[];
+};
+
 export type StudioCharacter = {
     id: string;
     name: string;
@@ -46,9 +52,12 @@ export type StudioShot = {
     order: number;
     description: string;
     dialogue?: string;
+    prompt?: string;
     assetRefs: StudioAssetRef[];
     generation?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
+    metadata?: Record<string, unknown> & {
+        references?: StudioShotReferences;
+    };
 };
 
 export type StudioEpisode = {

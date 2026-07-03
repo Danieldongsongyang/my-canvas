@@ -2,21 +2,24 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Alert, App, Button, ConfigProvider, Input, List, Modal, Select, Tag, Tooltip, theme as antdTheme } from "antd";
+import { Alert, App, Button, Checkbox, ConfigProvider, Input, List, Modal, Select, Tag, Tooltip, theme as antdTheme } from "antd";
 import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Save, Settings2, Sparkles, Users, WandSparkles } from "lucide-react";
 
 import {
     addCastAssetReference,
     generateCastReferences,
+    generateStoryboardShotImages,
     normalizeScriptStructure,
     parseAndApplyScript,
     removeCastCandidateReference,
     selectCastAssetReference,
     StudioGenerationError,
     updateCastEntityPrompt,
+    updateShotPrompt,
+    updateShotReferences,
     type StudioCastTargetKind,
 } from "@/services/api/studio-generation";
-import { studioRepository, type StudioEpisode, type StudioSeries } from "@/services/studio-local";
+import { studioRepository, type StudioEpisode, type StudioSeries, type StudioShotReferences } from "@/services/studio-local";
 import { useConfigStore } from "@/stores/use-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -62,6 +65,8 @@ export default function StudioWorkspacePage() {
     const [savingModelSettings, setSavingModelSettings] = useState(false);
     const [generatingCast, setGeneratingCast] = useState(false);
     const [workbenchTarget, setWorkbenchTarget] = useState<{ kind: StudioCastTargetKind; entityId: string } | null>(null);
+    const [shotWorkbenchId, setShotWorkbenchId] = useState<string | null>(null);
+    const [generatingShot, setGeneratingShot] = useState(false);
     const [modelDraft, setModelDraft] = useState<Record<StudioModelPreferenceKey, string>>({
         textModel: FOLLOW_GLOBAL_MODEL_VALUE,
         imageModel: FOLLOW_GLOBAL_MODEL_VALUE,
@@ -120,7 +125,7 @@ export default function StudioWorkspacePage() {
         setSavingStructure(true);
         setParseError("");
         try {
-            const structure = normalizeScriptStructure(JSON.parse(structureDraft));
+            const structure = normalizeScriptStructure(JSON.parse(structureDraft), { previousEpisode: episode });
             const result = await studioRepository.updateEpisode(series.id, episode.id, {
                 characters: structure.characters,
                 scenes: structure.scenes,
@@ -339,6 +344,104 @@ export default function StudioWorkspacePage() {
         }
     };
 
+    const saveShotWorkbenchPrompt = async (shotId: string, prompt: string) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await updateShotPrompt({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId,
+                prompt,
+            });
+            setSeries(updated.series);
+            setStructureDraft(formatEpisodeStructure(updated.episode));
+            message.success("Shot prompt 已保存");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "Shot prompt 保存失败");
+        }
+    };
+
+    const saveShotWorkbenchReferences = async (shotId: string, references: { characterIds: string[]; sceneIds: string[]; propIds: string[] }) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await updateShotReferences({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId,
+                references,
+            });
+            setSeries(updated.series);
+            setStructureDraft(formatEpisodeStructure(updated.episode));
+            message.success("镜头引用已保存");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "镜头引用保存失败");
+        }
+    };
+
+    const generateShotWorkbenchImages = async (shotId: string, prompt: string, references: { characterIds: string[]; sceneIds: string[]; propIds: string[] }, count: 1 | 2 | 4, allowNoReferences: boolean) => {
+        if (!series || !episode) return;
+        const shot = episode.shots.find((item) => item.id === shotId);
+        if (!shot) return;
+        if (!readArtDirectionDraft(episode)) {
+            setActiveStep("art_direction");
+            message.warning("请先完成 Style 定调");
+            return;
+        }
+        if (!isAiConfigReady(config, imageModel)) {
+            openConfigDialog(true);
+            message.warning("请先配置可用的图像模型");
+            return;
+        }
+        setGeneratingShot(true);
+        try {
+            let currentEpisode = episode;
+            if (prompt.trim() !== (shot.prompt ?? "").trim()) {
+                const updated = await updateShotPrompt({
+                    repository: studioRepository,
+                    seriesId: series.id,
+                    episodeId: episode.id,
+                    shotId,
+                    prompt,
+                });
+                setSeries(updated.series);
+                currentEpisode = updated.episode;
+            }
+            const currentShot = currentEpisode.shots.find((item) => item.id === shotId);
+            const currentReferences = currentShot?.metadata?.references;
+            if (JSON.stringify(currentReferences ?? { characterIds: [], sceneIds: [], propIds: [] }) !== JSON.stringify(references)) {
+                const updated = await updateShotReferences({
+                    repository: studioRepository,
+                    seriesId: series.id,
+                    episodeId: episode.id,
+                    shotId,
+                    references,
+                });
+                setSeries(updated.series);
+                currentEpisode = updated.episode;
+            }
+            const result = await generateStoryboardShotImages({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId,
+                config: { ...config, model: imageModel, imageModel },
+                assets,
+                count,
+                allowNoReferences,
+                addAsset,
+            });
+            setSeries(result.series);
+            setStructureDraft(formatEpisodeStructure(result.episode));
+            message.success(`已生成 ${result.createdAssetIds.length} 张分镜候选图`);
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "分镜候选图生成失败");
+        } finally {
+            setGeneratingShot(false);
+        }
+    };
+
     const runCastGeneration = async ({ target, count }: { target: Parameters<typeof generateCastReferences>[0]["target"]; count: 1 | 2 | 4 }) => {
         if (!series || !episode) return;
         if (!readArtDirectionDraft(episode)) {
@@ -441,7 +544,7 @@ export default function StudioWorkspacePage() {
                             onOpenWorkbench={(kind, entityId) => setWorkbenchTarget({ kind, entityId })}
                         />
                     ) : activeStep === "storyboard_r2v" ? (
-                        <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} />
+                        <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} onOpenWorkbench={setShotWorkbenchId} />
                     ) : (
                         <ComingStep step={steps.find((step) => step.id === activeStep)} episode={episode} />
                     )}
@@ -473,6 +576,18 @@ export default function StudioWorkspacePage() {
                     onRemoveCandidate={(kind, entityId, assetId) => void removeWorkbenchCandidate(kind, entityId, assetId)}
                     onAddLibraryAsset={(kind, entityId, asset, role) => void addWorkbenchLibraryAsset(kind, entityId, asset, role)}
                     onClose={() => setWorkbenchTarget(null)}
+                />
+                <ShotWorkbenchModal
+                    open={Boolean(shotWorkbenchId)}
+                    shotId={shotWorkbenchId}
+                    episode={episode}
+                    assets={assets}
+                    generating={generatingShot}
+                    imageModelReady={isAiConfigReady(config, imageModel)}
+                    onSavePrompt={(shotId, prompt) => void saveShotWorkbenchPrompt(shotId, prompt)}
+                    onSaveReferences={(shotId, references) => void saveShotWorkbenchReferences(shotId, references)}
+                    onGenerate={(shotId, prompt, references, count, allowNoReferences) => void generateShotWorkbenchImages(shotId, prompt, references, count, allowNoReferences)}
+                    onClose={() => setShotWorkbenchId(null)}
                 />
             </main>
         </ConfigProvider>
@@ -1087,7 +1202,7 @@ function findCastEntity(episode: StudioEpisode, kind: StudioCastTargetKind, enti
     return pool.find((entity) => entity.id === entityId);
 }
 
-function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; onJumpToScript: () => void }) {
+function StoryboardStep({ episode, onJumpToScript, onOpenWorkbench }: { episode: StudioEpisode; onJumpToScript: () => void; onOpenWorkbench: (shotId: string) => void }) {
     const cards = buildStoryboardCards(episode);
     const canGenerate = episode.script.trim().length >= 40 && episode.characters.length > 0;
 
@@ -1117,13 +1232,25 @@ function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; o
                     ) : (
                         <div className="space-y-4">
                             {cards.map((card) => (
-                                <article key={card.id} className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4">
+                                <article
+                                    key={card.id}
+                                    className="group cursor-pointer rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4 transition hover:border-[#34d8c4]/35 hover:bg-[#34d8c4]/[0.07]"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => onOpenWorkbench(card.id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") onOpenWorkbench(card.id);
+                                    }}
+                                >
                                     <div className="flex items-start gap-4">
                                         <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#34d8c4]/25 bg-[#34d8c4]/10 text-sm font-semibold text-[#34d8c4]">{String(card.order).padStart(2, "0")}</div>
                                         <div className="min-w-0 flex-1">
                                             <div className="mb-2 flex items-center gap-2">
                                                 <h3 className="text-base font-semibold text-[#f2ede4]">{card.title}</h3>
                                                 {card.hasDialogue ? <Tag color="blue">对白</Tag> : null}
+                                                <Tag color={card.hasReadyReferences ? "success" : card.hasExplicitReferences ? "warning" : "default"}>
+                                                    {card.hasReadyReferences ? "引用 ready" : card.hasExplicitReferences ? `引用 ${card.referenceCount}` : "引用缺失"}
+                                                </Tag>
                                                 <Tag color="default">候选 {card.candidateCount}</Tag>
                                             </div>
                                             <p className="whitespace-pre-wrap text-sm leading-7 text-[#a8a2b0]">{card.prompt}</p>
@@ -1150,6 +1277,243 @@ function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; o
             </div>
         </div>
     );
+}
+
+function ShotWorkbenchModal({
+    open,
+    shotId,
+    episode,
+    assets,
+    generating,
+    imageModelReady,
+    onSavePrompt,
+    onSaveReferences,
+    onGenerate,
+    onClose,
+}: {
+    open: boolean;
+    shotId: string | null;
+    episode: StudioEpisode;
+    assets: Asset[];
+    generating: boolean;
+    imageModelReady: boolean;
+    onSavePrompt: (shotId: string, prompt: string) => void;
+    onSaveReferences: (shotId: string, references: StudioShotReferences) => void;
+    onGenerate: (shotId: string, prompt: string, references: StudioShotReferences, count: 1 | 2 | 4, allowNoReferences: boolean) => void;
+    onClose: () => void;
+}) {
+    const shot = useMemo(() => (shotId ? episode.shots.find((item) => item.id === shotId) : null), [episode.shots, shotId]);
+    const style = readArtDirectionDraft(episode);
+    const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+    const [prompt, setPrompt] = useState("");
+    const [references, setReferences] = useState<StudioShotReferences>({ characterIds: [], sceneIds: [], propIds: [] });
+    const [count, setCount] = useState<1 | 2 | 4>(1);
+    const [allowNoReferences, setAllowNoReferences] = useState(false);
+
+    useEffect(() => {
+        if (!open || !shot) return;
+        setPrompt(shot.prompt || buildShotPromptFallback(shot));
+        setReferences(readShotReferences(shot));
+        setCount(1);
+        setAllowNoReferences(false);
+    }, [open, shot]);
+
+    if (!shotId || !shot) return null;
+
+    const readyReferences = collectReadyShotReferenceAssets(episode, references, assetMap);
+    const explicitReferenceCount = references.characterIds.length + references.sceneIds.length + references.propIds.length;
+    const effectivePrompt = prompt.trim() ? `${prompt.trim()}${style?.positivePrompt ? `\n\nStyle baseline:\n${style.positivePrompt}` : ""}` : "";
+    const generateDisabled = generating || !prompt.trim() || !style || !imageModelReady || (!readyReferences.length && !allowNoReferences);
+
+    return (
+        <Modal
+            open={open}
+            title={null}
+            footer={null}
+            width={1120}
+            centered
+            destroyOnHidden
+            onCancel={onClose}
+            styles={{
+                body: { padding: 0, background: "#131116" },
+            }}
+        >
+            <div className="bg-[#131116] text-[#f2ede4]">
+                <header className="flex items-start gap-4 border-b border-[rgba(255,255,255,0.06)] bg-[#0a090c]/75 px-6 py-5">
+                    <div className="grid size-10 shrink-0 place-items-center rounded-full border border-[#34d8c4]/35 bg-[#34d8c4]/10 text-[#34d8c4]">
+                        <Clapperboard className="size-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <p className="font-mono text-[0.625rem] uppercase tracking-[0.18em] text-[#8b8597]">Shot Workbench</p>
+                        <h2 className="mt-1 truncate text-2xl font-semibold text-[#f2ede4]">
+                            {String(shot.order).padStart(2, "0")} · {shot.title}
+                        </h2>
+                        <p className="mt-1 line-clamp-2 text-sm leading-6 text-[#a8a2b0]">{shot.description}</p>
+                    </div>
+                    <Tag color={readyReferences.length ? "success" : explicitReferenceCount ? "warning" : "default"}>{readyReferences.length ? `${readyReferences.length} refs ready` : explicitReferenceCount ? "refs missing image" : "no refs"}</Tag>
+                </header>
+
+                <div className="grid max-h-[76vh] grid-cols-1 overflow-hidden xl:grid-cols-[300px_minmax(0,1fr)_300px]">
+                    <aside className="min-h-0 space-y-4 overflow-y-auto border-b border-[rgba(255,255,255,0.06)] bg-[#181620]/70 p-5 xl:border-b-0 xl:border-r">
+                        <section className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0a090c]/70 p-4">
+                            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#f2ede4]">
+                                <Palette className="size-4 text-[#34d8c4]" />
+                                Style baseline
+                            </div>
+                            <p className="text-sm text-[#f2ede4]">{style?.name || "未保存"}</p>
+                            <p className="mt-2 line-clamp-4 text-xs leading-5 text-[#a8a2b0]">{style?.positivePrompt || "请先在 Style 步骤保存视觉风格。"}</p>
+                        </section>
+                        <section>
+                            <p className="mb-2 font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Cast selected refs</p>
+                            {readyReferences.length ? (
+                                <div className="grid grid-cols-2 gap-2">
+                                    {readyReferences.map(({ id, label, asset }) => (
+                                        <div key={`${label}-${id}`} className="overflow-hidden rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0a090c]/75">
+                                            <div className="flex aspect-[4/3] items-center justify-center bg-black/25 text-[#8b8597]">
+                                                <img src={getAssetCoverUrl(asset)} alt={label} className="h-full w-full object-cover" />
+                                            </div>
+                                            <p className="truncate px-2 py-1.5 text-xs text-[#a8a2b0]">{label}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-lg border border-dashed border-[#ffa94d]/25 bg-[#ffa94d]/10 p-4 text-sm leading-6 text-[#ffa94d]">当前镜头没有可用 Cast selected reference images。</div>
+                            )}
+                        </section>
+                    </aside>
+
+                    <section className="min-h-0 overflow-y-auto p-5">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p className="font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Prompt Editor</p>
+                                <h3 className="mt-1 text-lg font-semibold text-[#f2ede4]">镜头 prompt</h3>
+                            </div>
+                            <Button
+                                className="!rounded-full !border-[rgba(255,255,255,0.08)] !bg-[rgba(255,255,255,0.045)] !text-[#a8a2b0] hover:!border-[#34d8c4]/35 hover:!text-[#f2ede4]"
+                                icon={<Save className="size-4" />}
+                                onClick={() => onSavePrompt(shotId, prompt)}
+                            >
+                                保存 prompt
+                            </Button>
+                        </div>
+                        <Input.TextArea className="!font-mono !text-sm !leading-6" value={prompt} autoSize={{ minRows: 8, maxRows: 12 }} spellCheck={false} onChange={(event) => setPrompt(event.target.value)} />
+
+                        <section className="mt-4 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0a090c]/70 p-4">
+                            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#f2ede4]">
+                                <WandSparkles className="size-4 text-[#ffa94d]" />
+                                Effective prompt preview
+                            </div>
+                            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-6 text-[#a8a2b0]">{effectivePrompt || "填写镜头 prompt 后预览最终生成提示词。"}</p>
+                        </section>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4">
+                            <div className="flex items-center gap-2">
+                                {[1, 2, 4].map((value) => (
+                                    <button
+                                        key={value}
+                                        className={cn(
+                                            "grid size-9 place-items-center rounded-full border text-sm font-semibold transition",
+                                            count === value ? "border-[#34d8c4]/60 bg-[#34d8c4]/15 text-[#34d8c4]" : "border-[rgba(255,255,255,0.08)] text-[#8b8597] hover:text-[#f2ede4]",
+                                        )}
+                                        onClick={() => setCount(value as 1 | 2 | 4)}
+                                    >
+                                        {value}
+                                    </button>
+                                ))}
+                            </div>
+                            <Button
+                                className={studioPrimaryButtonClass}
+                                type="primary"
+                                icon={<WandSparkles className="size-4" />}
+                                loading={generating}
+                                disabled={generateDisabled}
+                                onClick={() => onGenerate(shotId, prompt, references, count, allowNoReferences)}
+                            >
+                                生成候选
+                            </Button>
+                        </div>
+                        <Checkbox className="mt-3 !text-[#a8a2b0]" checked={allowNoReferences} onChange={(event) => setAllowNoReferences(event.target.checked)}>
+                            允许无参考生成
+                        </Checkbox>
+                        {!style ? <p className="mt-2 text-xs text-[#ffa94d]">请先保存 Style 定调后再生成。</p> : null}
+                        {!imageModelReady ? <p className="mt-2 text-xs text-[#ffa94d]">请先配置可用的图像模型。</p> : null}
+                        {!readyReferences.length && !allowNoReferences ? <p className="mt-2 text-xs text-[#ffa94d]">默认必须基于 Cast selected reference images；无参考生成需要显式勾选。</p> : null}
+                    </section>
+
+                    <aside className="min-h-0 overflow-y-auto border-t border-[rgba(255,255,255,0.06)] bg-[#181620]/70 p-5 xl:border-l xl:border-t-0">
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                            <div>
+                                <p className="font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">References</p>
+                                <h3 className="mt-1 text-lg font-semibold text-[#f2ede4]">显式引用</h3>
+                            </div>
+                            <Button className="!rounded-full" size="small" icon={<Save className="size-3.5" />} onClick={() => onSaveReferences(shotId, references)}>
+                                保存
+                            </Button>
+                        </div>
+                        <ReferenceSelect label="角色" value={references.characterIds} options={episode.characters.map((item) => ({ label: item.name, value: item.id }))} onChange={(characterIds) => setReferences({ ...references, characterIds })} />
+                        <ReferenceSelect label="场景" value={references.sceneIds} options={episode.scenes.map((item) => ({ label: item.name, value: item.id }))} onChange={(sceneIds) => setReferences({ ...references, sceneIds })} />
+                        <ReferenceSelect label="道具" value={references.propIds} options={episode.props.map((item) => ({ label: item.name, value: item.id }))} onChange={(propIds) => setReferences({ ...references, propIds })} />
+
+                        <div className="mt-5">
+                            <p className="mb-2 font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Gallery</p>
+                            <div className="grid grid-cols-2 gap-2">
+                                {shot.assetRefs
+                                    .filter((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate"))
+                                    .map((ref) => {
+                                        const asset = assetMap.get(ref.assetId);
+                                        const src = asset ? getAssetCoverUrl(asset) : "";
+                                        return (
+                                            <div key={`${ref.assetId}-${ref.role}`} className={cn("overflow-hidden rounded-lg border bg-[#0a090c]/75", ref.role === "selected" ? "border-[#34d8c4]/55" : "border-[rgba(255,255,255,0.06)]")}>
+                                                <div className="relative flex aspect-[4/3] items-center justify-center bg-black/25 text-[#8b8597]">
+                                                    {src ? <img src={src} alt="Storyboard candidate" className="h-full w-full object-cover" /> : <Image className="size-6" />}
+                                                    {ref.role === "selected" ? <span className="absolute left-2 top-2 rounded-full bg-[#34d8c4] px-2 py-1 text-[0.625rem] font-semibold text-[#0c0b0e]">selected</span> : null}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                            {!shot.assetRefs.some((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate")) ? (
+                                <div className="rounded-lg border border-dashed border-[rgba(255,255,255,0.10)] p-6 text-center text-sm text-[#8b8597]">还没有候选图</div>
+                            ) : null}
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function ReferenceSelect({ label, value, options, onChange }: { label: string; value: string[]; options: Array<{ label: string; value: string }>; onChange: (value: string[]) => void }) {
+    return (
+        <label className="mb-4 block">
+            <span className="mb-2 block text-xs font-medium text-[#a8a2b0]">{label}</span>
+            <Select mode="multiple" className="w-full" value={value} options={options} placeholder={`选择${label}`} onChange={onChange} />
+        </label>
+    );
+}
+
+function readShotReferences(shot: StudioEpisode["shots"][number]): StudioShotReferences {
+    return {
+        characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
+        sceneIds: Array.isArray(shot.metadata?.references?.sceneIds) ? shot.metadata.references.sceneIds : [],
+        propIds: Array.isArray(shot.metadata?.references?.propIds) ? shot.metadata.references.propIds : [],
+    };
+}
+
+function buildShotPromptFallback(shot: Pick<StudioEpisode["shots"][number], "description" | "dialogue">) {
+    return [shot.description.trim(), shot.dialogue?.trim() ? `对白：${shot.dialogue.trim()}` : ""].filter(Boolean).join("\n");
+}
+
+function collectReadyShotReferenceAssets(episode: StudioEpisode, references: StudioShotReferences, assetMap: Map<string, Asset>) {
+    const entities = [
+        ...episode.characters.filter((item) => references.characterIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name, ref: item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected") })),
+        ...episode.scenes.filter((item) => references.sceneIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name, ref: item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected") })),
+        ...episode.props.filter((item) => references.propIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name, ref: item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected") })),
+    ];
+    return entities.flatMap((item) => {
+        const asset = item.ref ? assetMap.get(item.ref.assetId) : undefined;
+        return asset && asset.kind === "image" ? [{ id: item.id, label: item.label, asset }] : [];
+    });
 }
 
 function PreflightRow({ passed, title, hint }: { passed: boolean; title: string; hint: string }) {

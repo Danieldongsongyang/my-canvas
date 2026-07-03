@@ -128,6 +128,10 @@ _Avoid_: 纯静态壳、完整视频生产系统
 Studio 镜头卡中用户可见、可编辑、可复制、可保存和可复用的完整生成提示词，是单镜头图片或视频生成请求的创作输入。
 _Avoid_: 隐藏上下文、基础 prompt、生成适配层暗中拼接的最终 prompt
 
+**Studio 镜头显式引用**:
+Studio 镜头对本集角色、场景和道具的结构化引用关系，用于决定 Storyboard 生成时应携带哪些 Cast selected reference images。
+_Avoid_: 名称匹配、文本猜测、隐式引用推断
+
 **Studio 生成适配层**:
 当前前端中承载 Studio 剧本解析、提示词初稿、显性插入/重组、结构化结果校验和生成调用的 TypeScript 服务层，底层使用现有用户态 AI relay。
 _Avoid_: LumenX Python 后端、mange-backend Studio 业务接口

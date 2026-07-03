@@ -58,6 +58,9 @@ export type StudioStoryboardCard = {
     prompt: string;
     hasDialogue: boolean;
     candidateCount: number;
+    referenceCount: number;
+    hasExplicitReferences: boolean;
+    hasReadyReferences: boolean;
 };
 
 export type StudioModelPreferenceKey = keyof StudioSeries["modelPreferences"];
@@ -186,7 +189,15 @@ export function formatEpisodeStructure(episode: StudioEpisode | null) {
             characters: episode?.characters.map(({ name, description, prompt }) => ({ name, description, prompt: prompt || buildCastPromptFallback("character", name, description) })) ?? [],
             scenes: episode?.scenes.map(({ name, description, prompt }) => ({ name, description, prompt: prompt || buildCastPromptFallback("scene", name, description) })) ?? [],
             props: episode?.props.map(({ name, description, prompt }) => ({ name, description, prompt: prompt || buildCastPromptFallback("prop", name, description) })) ?? [],
-            shotDrafts: episode?.shots.map(({ title, description, dialogue }) => ({ title, description, ...(dialogue ? { dialogue } : {}) })) ?? [],
+            shotDrafts:
+                episode?.shots.map((shot) => ({
+                    id: shot.id,
+                    title: shot.title,
+                    description: shot.description,
+                    ...(shot.dialogue ? { dialogue: shot.dialogue } : {}),
+                    prompt: shot.prompt || buildShotPromptFallback(shot),
+                    references: readShotReferences(shot),
+                })) ?? [],
         },
         null,
         2,
@@ -248,7 +259,14 @@ export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCa
     return [...episode.shots]
         .sort((a, b) => a.order - b.order)
         .map((shot) => {
-            const prompt = shot.dialogue ? `${shot.description}\n对白：${shot.dialogue}` : shot.description;
+            const prompt = shot.prompt?.trim() || buildShotPromptFallback(shot);
+            const references = readShotReferences(shot);
+            const referencedIds = [...references.characterIds, ...references.sceneIds, ...references.propIds];
+            const readyReferenceIds = new Set([
+                ...episode.characters.filter((item) => references.characterIds.includes(item.id) && getSelectedImageRef(item.assetRefs)).map((item) => item.id),
+                ...episode.scenes.filter((item) => references.sceneIds.includes(item.id) && getSelectedImageRef(item.assetRefs)).map((item) => item.id),
+                ...episode.props.filter((item) => references.propIds.includes(item.id) && getSelectedImageRef(item.assetRefs)).map((item) => item.id),
+            ]);
             return {
                 id: shot.id,
                 title: shot.title,
@@ -256,6 +274,9 @@ export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCa
                 prompt,
                 hasDialogue: Boolean(shot.dialogue?.trim()),
                 candidateCount: shot.assetRefs.filter((ref) => ref.role === "candidate" || ref.role === "selected").length,
+                referenceCount: referencedIds.length,
+                hasExplicitReferences: referencedIds.length > 0,
+                hasReadyReferences: referencedIds.length > 0 && referencedIds.every((id) => readyReferenceIds.has(id)),
             };
         });
 }
@@ -292,6 +313,22 @@ function buildCastItem(item: { id: string; name: string; description: string; pr
         candidateCount,
         lastError: imageGeneration.lastImageError,
     };
+}
+
+function getSelectedImageRef(refs: StudioAssetRef[]) {
+    return refs.find((ref) => ref.kind === "image" && ref.role === "selected");
+}
+
+function readShotReferences(shot: StudioEpisode["shots"][number]) {
+    return {
+        characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
+        sceneIds: Array.isArray(shot.metadata?.references?.sceneIds) ? shot.metadata.references.sceneIds : [],
+        propIds: Array.isArray(shot.metadata?.references?.propIds) ? shot.metadata.references.propIds : [],
+    };
+}
+
+function buildShotPromptFallback(shot: Pick<StudioEpisode["shots"][number], "description" | "dialogue">) {
+    return [shot.description.trim(), shot.dialogue?.trim() ? `对白：${shot.dialogue.trim()}` : ""].filter(Boolean).join("\n");
 }
 
 function countTextMentions(text: string, term: string) {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createInMemoryStudioStorage, createStudioRepository } from "@/services/studio-local";
 import {
     addCastAssetReference,
+    generateStoryboardShotImages,
     generateCastReferences,
     normalizeScriptStructure,
     parseAndApplyScript,
@@ -11,6 +12,8 @@ import {
     selectCastAssetReference,
     StudioGenerationError,
     updateCastEntityPrompt,
+    updateShotPrompt,
+    updateShotReferences,
 } from "@/services/api/studio-generation";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -52,10 +55,21 @@ const relayJson = JSON.stringify({
             title: "雨夜开场",
             description: "霓虹灯下，阿岚擦拭柜台，门口风铃响起。",
             dialogue: "又是这个点。",
+            prompt: "wide cinematic shot, A Lan wipes the counter in a rainy neon convenience store",
+            references: {
+                characters: ["阿岚"],
+                scenes: ["山海便利店"],
+                props: [],
+            },
         },
         {
             title: "贝壳亮起",
             description: "客人放下发光贝壳，货架间映出蓝色海浪。",
+            references: {
+                characters: [],
+                scenes: ["山海便利店"],
+                props: ["发光贝壳"],
+            },
         },
     ],
 });
@@ -78,8 +92,23 @@ describe("studio generation adapter", () => {
         expect(result.scenes).toMatchObject([{ name: "山海便利店", description: "雨夜里的街角便利店", prompt: "雨夜街角便利店，霓虹灯反射在湿润路面，室内暖光", assetRefs: [] }]);
         expect(result.props).toMatchObject([{ name: "发光贝壳", description: "能映出海潮记忆", prompt: "发光贝壳道具，半透明蓝色纹理，柔和海潮微光，产品参考图", assetRefs: [] }]);
         expect(result.shots).toMatchObject([
-            { title: "雨夜开场", order: 1, description: "霓虹灯下，阿岚擦拭柜台，门口风铃响起。", dialogue: "又是这个点。", assetRefs: [] },
-            { title: "贝壳亮起", order: 2, description: "客人放下发光贝壳，货架间映出蓝色海浪。", assetRefs: [] },
+            {
+                title: "雨夜开场",
+                order: 1,
+                description: "霓虹灯下，阿岚擦拭柜台，门口风铃响起。",
+                dialogue: "又是这个点。",
+                prompt: "wide cinematic shot, A Lan wipes the counter in a rainy neon convenience store",
+                assetRefs: [],
+                metadata: { references: { characterIds: [expect.any(String)], sceneIds: [expect.any(String)], propIds: [] } },
+            },
+            {
+                title: "贝壳亮起",
+                order: 2,
+                description: "客人放下发光贝壳，货架间映出蓝色海浪。",
+                prompt: "客人放下发光贝壳，货架间映出蓝色海浪。",
+                assetRefs: [],
+                metadata: { references: { characterIds: [], sceneIds: [expect.any(String)], propIds: [expect.any(String)] } },
+            },
         ]);
         expect(result.rawText).toContain("模型输出如下");
     });
@@ -181,7 +210,118 @@ describe("studio generation adapter", () => {
         });
 
         expect(result.characters).toMatchObject([{ name: "手工角色", description: "手动补充", prompt: "手工角色参考图", assetRefs: [] }]);
-        expect(result.shots).toMatchObject([{ title: "手工镜头", order: 1, description: "用户自己写的分镜", assetRefs: [] }]);
+        expect(result.shots).toMatchObject([{ title: "手工镜头", order: 1, description: "用户自己写的分镜", prompt: "用户自己写的分镜", assetRefs: [], metadata: { references: { characterIds: [], sceneIds: [], propIds: [] } } }]);
+    });
+
+    it("preserves manually edited shot prompt and references when saving a structure draft without those fields", () => {
+        const result = normalizeScriptStructure(
+            {
+                characters: [{ id: "char-1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图" }],
+                scenes: [{ id: "scene-1", name: "便利店", description: "雨夜街角", prompt: "便利店场景参考图" }],
+                props: [],
+                shotDrafts: [{ id: "shot-1", title: "开场", description: "新的描述" }],
+            },
+            {
+                previousEpisode: {
+                    id: "episode-1",
+                    title: "Episode 01",
+                    order: 1,
+                    script: "",
+                    characters: [{ id: "char-1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] }],
+                    scenes: [{ id: "scene-1", name: "便利店", description: "雨夜街角", prompt: "便利店场景参考图", assetRefs: [] }],
+                    props: [],
+                    shots: [
+                        {
+                            id: "shot-1",
+                            title: "开场",
+                            order: 1,
+                            description: "旧描述",
+                            prompt: "用户精修后的镜头 prompt",
+                            assetRefs: [],
+                            metadata: { references: { characterIds: ["char-1"], sceneIds: ["scene-1"], propIds: [] } },
+                        },
+                    ],
+                    createdAt: "2026-07-01T08:00:00.000Z",
+                    updatedAt: "2026-07-01T08:00:00.000Z",
+                },
+            },
+        );
+
+        expect(result.shots?.[0]).toMatchObject({
+            id: "shot-1",
+            description: "新的描述",
+            prompt: "用户精修后的镜头 prompt",
+            metadata: { references: { characterIds: ["char-1"], sceneIds: ["scene-1"], propIds: [] } },
+        });
+        expect(result.characters?.[0].id).toBe("char-1");
+        expect(result.scenes?.[0].id).toBe("scene-1");
+    });
+
+    it("updates shot prompt without changing explicit references", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            shots: [{ id: "shot-1", title: "开场", order: 1, description: "描述", prompt: "旧 prompt", assetRefs: [], metadata: { references: { characterIds: ["char-1"], sceneIds: [], propIds: [] } } }],
+        });
+
+        const result = await updateShotPrompt({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            shotId: "shot-1",
+            prompt: "新 prompt",
+        });
+
+        expect(result.episode.shots[0]).toMatchObject({
+            prompt: "新 prompt",
+            description: "描述",
+            metadata: { references: { characterIds: ["char-1"], sceneIds: [], propIds: [] } },
+        });
+    });
+
+    it("updates shot references with validation, dedupe and episode ordering without changing prompt text", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            characters: [
+                { id: "char-1", name: "阿岚", description: "", prompt: "阿岚", assetRefs: [] },
+                { id: "char-2", name: "青蛇", description: "", prompt: "青蛇", assetRefs: [] },
+            ],
+            scenes: [{ id: "scene-1", name: "便利店", description: "", prompt: "便利店", assetRefs: [] }],
+            props: [{ id: "prop-1", name: "贝壳", description: "", prompt: "贝壳", assetRefs: [] }],
+            shots: [{ id: "shot-1", title: "开场", order: 1, description: "描述", dialogue: "对白", prompt: "保留这个 prompt", assetRefs: [], metadata: { references: { characterIds: [], sceneIds: [], propIds: [] } } }],
+        });
+
+        const result = await updateShotReferences({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            shotId: "shot-1",
+            references: {
+                characterIds: ["char-2", "char-1", "char-2"],
+                sceneIds: ["scene-1"],
+                propIds: ["prop-1"],
+            },
+        });
+
+        expect(result.episode.shots[0]).toMatchObject({
+            prompt: "保留这个 prompt",
+            description: "描述",
+            dialogue: "对白",
+            metadata: { references: { characterIds: ["char-1", "char-2"], sceneIds: ["scene-1"], propIds: ["prop-1"] } },
+        });
+
+        await expect(
+            updateShotReferences({
+                repository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId: "shot-1",
+                references: { characterIds: ["missing"], sceneIds: [], propIds: [] },
+            }),
+        ).rejects.toThrow("镜头引用包含不存在的角色");
     });
 
     it("generates a selected Cast reference for a missing character through asset-first storage", async () => {
@@ -664,5 +804,182 @@ describe("studio generation adapter", () => {
         await expect(repository.getSeries(series.id)).resolves.toMatchObject({
             episodes: [expect.objectContaining({ scenes: [expect.objectContaining({ prompt: "新的雨夜便利店场景参考图" })] })],
         });
+    });
+
+    it("generates storyboard candidates with Cast selected references through requestEdit and asset-first storage", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            characters: [{ id: "char-1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [{ assetId: "asset-char", kind: "image", role: "selected" }] }],
+            scenes: [{ id: "scene-1", name: "便利店", description: "雨夜街角", prompt: "便利店场景参考图", assetRefs: [{ assetId: "asset-scene", kind: "image", role: "selected" }] }],
+            props: [],
+            shots: [{ id: "shot-1", title: "开场", order: 1, description: "描述", prompt: "用户精修镜头 prompt", assetRefs: [], metadata: { references: { characterIds: ["char-1"], sceneIds: ["scene-1"], propIds: [] } } }],
+            generation: {
+                artDirection: {
+                    status: "completed",
+                    name: "雨夜霓虹电影感",
+                    positivePrompt: "cinematic neon noir",
+                    negativePrompt: "low quality",
+                    savedAt: "2026-07-01T08:30:00.000Z",
+                },
+            },
+        });
+        const requestEdit = vi.fn(async () => [{ id: "image-1", dataUrl: "data:image/png;base64,SHOT" }]);
+        const requestGeneration = vi.fn(async () => [{ id: "text-image", dataUrl: "data:image/png;base64,TEXT" }]);
+        const storeImage = vi.fn(async () => ({ url: "blob:shot", storageKey: "image:shot", width: 1280, height: 720, bytes: 333, mimeType: "image/png" }));
+        const addAsset = vi.fn(() => "asset-shot-1");
+
+        const result = await generateStoryboardShotImages({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            shotId: "shot-1",
+            config,
+            assets: [
+                {
+                    id: "asset-char",
+                    kind: "image",
+                    title: "阿岚",
+                    coverUrl: "blob:char",
+                    tags: [],
+                    source: "Studio Cast",
+                    data: { dataUrl: "blob:char", storageKey: "char-key", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" },
+                    createdAt: "",
+                    updatedAt: "",
+                },
+                {
+                    id: "asset-scene",
+                    kind: "image",
+                    title: "便利店",
+                    coverUrl: "blob:scene",
+                    tags: [],
+                    source: "Studio Cast",
+                    data: { dataUrl: "blob:scene", storageKey: "scene-key", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" },
+                    createdAt: "",
+                    updatedAt: "",
+                },
+            ],
+            count: 1,
+            requestEdit,
+            requestGeneration,
+            storeImage,
+            addAsset,
+            now: () => "2026-07-03T13:00:00.000Z",
+        });
+
+        expect(requestEdit).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-image-1", imageModel: "gpt-image-1", count: "1", size: "16:9" }), expect.stringContaining("用户精修镜头 prompt"), [
+            expect.objectContaining({ id: "asset-char", storageKey: "char-key" }),
+            expect.objectContaining({ id: "asset-scene", storageKey: "scene-key" }),
+        ]);
+        expect(requestGeneration).not.toHaveBeenCalled();
+        expect(storeImage).toHaveBeenCalledWith("data:image/png;base64,SHOT");
+        expect(addAsset).toHaveBeenCalledWith(
+            expect.objectContaining({
+                kind: "image",
+                title: "开场 分镜图 1",
+                source: "Studio Storyboard",
+                metadata: expect.objectContaining({
+                    source: "studio-storyboard",
+                    shotId: "shot-1",
+                    prompt: "用户精修镜头 prompt",
+                    style: "雨夜霓虹电影感",
+                    effectivePrompt: expect.stringContaining("Style baseline:"),
+                    model: "gpt-image-1",
+                    referenceAssetIds: ["asset-char", "asset-scene"],
+                    count: 1,
+                    aspectRatio: "16:9",
+                    batchId: expect.any(String),
+                }),
+            }),
+        );
+        expect(result.episode.shots[0].assetRefs).toMatchObject([
+            {
+                assetId: "asset-shot-1",
+                kind: "image",
+                role: "selected",
+                metadata: expect.objectContaining({
+                    source: "studio-storyboard",
+                    effectivePrompt: expect.stringContaining("cinematic neon noir"),
+                    referenceAssetIds: ["asset-char", "asset-scene"],
+                    count: 1,
+                    aspectRatio: "16:9",
+                    batchId: expect.any(String),
+                }),
+            },
+        ]);
+    });
+
+    it("blocks storyboard generation without ready references unless explicitly allowed", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            shots: [{ id: "shot-1", title: "开场", order: 1, description: "描述", prompt: "镜头 prompt", assetRefs: [{ assetId: "existing", kind: "image", role: "selected" }], metadata: { references: { characterIds: [], sceneIds: [], propIds: [] } } }],
+            generation: { artDirection: { status: "completed", name: "风格", positivePrompt: "style", negativePrompt: "", savedAt: "" } },
+        });
+
+        await expect(
+            generateStoryboardShotImages({
+                repository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId: "shot-1",
+                config,
+                assets: [],
+                count: 1,
+                addAsset: vi.fn(),
+                requestEdit: vi.fn(),
+                requestGeneration: vi.fn(),
+            }),
+        ).rejects.toThrow("缺少 Cast selected reference images");
+
+        await expect(repository.getSeries(series.id)).resolves.toMatchObject({
+            episodes: [expect.objectContaining({ shots: [expect.objectContaining({ assetRefs: [{ assetId: "existing", kind: "image", role: "selected" }] })] })],
+        });
+    });
+
+    it("uses requestGeneration only when storyboard no-reference generation is explicitly allowed and appends later results as candidates", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            shots: [
+                { id: "shot-1", title: "开场", order: 1, description: "描述", prompt: "镜头 prompt", assetRefs: [{ assetId: "selected-old", kind: "image", role: "selected" }], metadata: { references: { characterIds: [], sceneIds: [], propIds: [] } } },
+            ],
+            generation: { artDirection: { status: "completed", name: "风格", positivePrompt: "style", negativePrompt: "", savedAt: "" } },
+        });
+        const requestGeneration = vi.fn(async () => [
+            { id: "image-1", dataUrl: "data:image/png;base64,ONE" },
+            { id: "image-2", dataUrl: "data:image/png;base64,TWO" },
+        ]);
+        const storeImage = vi
+            .fn()
+            .mockResolvedValueOnce({ url: "blob:one", storageKey: "image:one", width: 1280, height: 720, bytes: 111, mimeType: "image/png" })
+            .mockResolvedValueOnce({ url: "blob:two", storageKey: "image:two", width: 1280, height: 720, bytes: 222, mimeType: "image/png" });
+        const addAsset = vi.fn().mockReturnValueOnce("asset-one").mockReturnValueOnce("asset-two");
+
+        const result = await generateStoryboardShotImages({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            shotId: "shot-1",
+            config,
+            assets: [],
+            count: 2,
+            allowNoReferences: true,
+            requestEdit: vi.fn(),
+            requestGeneration,
+            storeImage,
+            addAsset,
+            now: () => "2026-07-03T13:05:00.000Z",
+        });
+
+        expect(requestGeneration).toHaveBeenCalledWith(expect.objectContaining({ count: "2", size: "16:9" }), expect.stringContaining("镜头 prompt"));
+        expect(result.episode.shots[0].assetRefs).toMatchObject([
+            { assetId: "selected-old", kind: "image", role: "selected" },
+            { assetId: "asset-one", kind: "image", role: "candidate" },
+            { assetId: "asset-two", kind: "image", role: "candidate" },
+        ]);
     });
 });
