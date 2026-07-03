@@ -3,16 +3,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Alert, App, Button, Checkbox, ConfigProvider, Input, List, Modal, Select, Tag, Tooltip, theme as antdTheme } from "antd";
-import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Save, Settings2, Sparkles, Users, WandSparkles } from "lucide-react";
+import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, RotateCcw, Save, Settings2, Sparkles, Star, Trash2, Users, WandSparkles } from "lucide-react";
 
 import {
     addCastAssetReference,
     generateCastReferences,
+    generateMissingStoryboardShotImages,
     generateStoryboardShotImages,
     normalizeScriptStructure,
     parseAndApplyScript,
     removeCastCandidateReference,
+    removeStoryboardShotCandidateReference,
     selectCastAssetReference,
+    selectStoryboardShotAssetReference,
     StudioGenerationError,
     updateCastEntityPrompt,
     updateShotPrompt,
@@ -67,6 +70,7 @@ export default function StudioWorkspacePage() {
     const [workbenchTarget, setWorkbenchTarget] = useState<{ kind: StudioCastTargetKind; entityId: string } | null>(null);
     const [shotWorkbenchId, setShotWorkbenchId] = useState<string | null>(null);
     const [generatingShot, setGeneratingShot] = useState(false);
+    const [generatingStoryboardBatch, setGeneratingStoryboardBatch] = useState(false);
     const [modelDraft, setModelDraft] = useState<Record<StudioModelPreferenceKey, string>>({
         textModel: FOLLOW_GLOBAL_MODEL_VALUE,
         imageModel: FOLLOW_GLOBAL_MODEL_VALUE,
@@ -442,6 +446,82 @@ export default function StudioWorkspacePage() {
         }
     };
 
+    const selectShotWorkbenchReference = async (shotId: string, assetId: string) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await selectStoryboardShotAssetReference({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId,
+                assetId,
+            });
+            setSeries(updated.series);
+            message.success("已设为分镜主图");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "分镜主图切换失败");
+        }
+    };
+
+    const removeShotWorkbenchCandidate = async (shotId: string, assetId: string) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await removeStoryboardShotCandidateReference({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId,
+                assetId,
+            });
+            setSeries(updated.series);
+            message.success("已移除候选关系，素材仍保留在素材库");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "分镜候选移除失败");
+        }
+    };
+
+    const runStoryboardBatchGeneration = async (target: Parameters<typeof generateMissingStoryboardShotImages>[0]["target"]) => {
+        if (!series || !episode) return;
+        if (!readArtDirectionDraft(episode)) {
+            setActiveStep("art_direction");
+            message.warning("请先完成 Style 定调");
+            return;
+        }
+        if (!isAiConfigReady(config, imageModel)) {
+            openConfigDialog(true);
+            message.warning("请先配置可用的图像模型");
+            return;
+        }
+        setGeneratingStoryboardBatch(true);
+        try {
+            const result = await generateMissingStoryboardShotImages({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                config: { ...config, model: imageModel, imageModel },
+                assets,
+                target,
+                count: 1,
+                addAsset,
+            });
+            setSeries(result.series);
+            const completed = result.results.filter((item) => item.status === "completed").length;
+            const failed = result.results.filter((item) => item.status === "failed").length;
+            const skipped = result.results.filter((item) => item.status === "skipped").length;
+            if (!result.results.length) {
+                message.info("镜头图已生成");
+            } else if (failed || skipped) {
+                message.warning(`已生成 ${completed} 个镜头，${failed} 个失败，${skipped} 个跳过`);
+            } else {
+                message.success(`已生成 ${completed} 个镜头图`);
+            }
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "分镜批量生成失败");
+        } finally {
+            setGeneratingStoryboardBatch(false);
+        }
+    };
+
     const runCastGeneration = async ({ target, count }: { target: Parameters<typeof generateCastReferences>[0]["target"]; count: 1 | 2 | 4 }) => {
         if (!series || !episode) return;
         if (!readArtDirectionDraft(episode)) {
@@ -544,7 +624,15 @@ export default function StudioWorkspacePage() {
                             onOpenWorkbench={(kind, entityId) => setWorkbenchTarget({ kind, entityId })}
                         />
                     ) : activeStep === "storyboard_r2v" ? (
-                        <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} onOpenWorkbench={setShotWorkbenchId} />
+                        <StoryboardStep
+                            episode={episode}
+                            assets={assets}
+                            generating={generatingStoryboardBatch}
+                            onGenerateMissing={() => void runStoryboardBatchGeneration({ mode: "allMissing" })}
+                            onRetryFailed={() => void runStoryboardBatchGeneration({ mode: "failedOnly" })}
+                            onJumpToScript={() => setActiveStep("script")}
+                            onOpenWorkbench={setShotWorkbenchId}
+                        />
                     ) : (
                         <ComingStep step={steps.find((step) => step.id === activeStep)} episode={episode} />
                     )}
@@ -587,6 +675,8 @@ export default function StudioWorkspacePage() {
                     onSavePrompt={(shotId, prompt) => void saveShotWorkbenchPrompt(shotId, prompt)}
                     onSaveReferences={(shotId, references) => void saveShotWorkbenchReferences(shotId, references)}
                     onGenerate={(shotId, prompt, references, count, allowNoReferences) => void generateShotWorkbenchImages(shotId, prompt, references, count, allowNoReferences)}
+                    onSelectReference={(shotId, assetId) => void selectShotWorkbenchReference(shotId, assetId)}
+                    onRemoveCandidate={(shotId, assetId) => void removeShotWorkbenchCandidate(shotId, assetId)}
                     onClose={() => setShotWorkbenchId(null)}
                 />
             </main>
@@ -1202,9 +1292,30 @@ function findCastEntity(episode: StudioEpisode, kind: StudioCastTargetKind, enti
     return pool.find((entity) => entity.id === entityId);
 }
 
-function StoryboardStep({ episode, onJumpToScript, onOpenWorkbench }: { episode: StudioEpisode; onJumpToScript: () => void; onOpenWorkbench: (shotId: string) => void }) {
+function StoryboardStep({
+    episode,
+    assets,
+    generating,
+    onGenerateMissing,
+    onRetryFailed,
+    onJumpToScript,
+    onOpenWorkbench,
+}: {
+    episode: StudioEpisode;
+    assets: Asset[];
+    generating: boolean;
+    onGenerateMissing: () => void;
+    onRetryFailed: () => void;
+    onJumpToScript: () => void;
+    onOpenWorkbench: (shotId: string) => void;
+}) {
     const cards = buildStoryboardCards(episode);
+    const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
     const canGenerate = episode.script.trim().length >= 40 && episode.characters.length > 0;
+    const readyCount = cards.filter((card) => card.status === "ready").length;
+    const failedCount = cards.filter((card) => card.status === "failed").length;
+    const generatableMissingCount = cards.filter((card) => card.status === "pending" && card.hasExplicitReferences && card.missingReferenceChips.length === 0).length;
+    const missingButtonLabel = generatableMissingCount ? `生成缺失镜头 ${generatableMissingCount}` : cards.length > 0 && readyCount === cards.length ? "镜头图已生成" : "无可生成镜头";
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden">
@@ -1216,13 +1327,19 @@ function StoryboardStep({ episode, onJumpToScript, onOpenWorkbench }: { episode:
                 pills={
                     <>
                         <StepPill label="镜头" value={cards.length} />
+                        <StepPill label="已生成" value={readyCount} />
                         <StepPill label="对白" value={cards.filter((card) => card.hasDialogue).length} />
                     </>
                 }
                 trailing={
-                    <Button className={studioPrimaryButtonClass} type="primary" icon={<WandSparkles className="size-4" />} disabled={!canGenerate}>
-                        从剧本生成分镜
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button className={studioSecondaryButtonClass} icon={<RotateCcw className="size-4" />} loading={generating} disabled={!failedCount} onClick={onRetryFailed}>
+                            重试失败项
+                        </Button>
+                        <Button className={studioPrimaryButtonClass} type="primary" icon={<WandSparkles className="size-4" />} loading={generating} disabled={!generatableMissingCount} onClick={onGenerateMissing}>
+                            {missingButtonLabel}
+                        </Button>
+                    </div>
                 }
             />
             <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-[#131116] xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -1243,17 +1360,46 @@ function StoryboardStep({ episode, onJumpToScript, onOpenWorkbench }: { episode:
                                     }}
                                 >
                                     <div className="flex items-start gap-4">
-                                        <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-[#34d8c4]/25 bg-[#34d8c4]/10 text-sm font-semibold text-[#34d8c4]">{String(card.order).padStart(2, "0")}</div>
+                                        <div className="w-36 shrink-0 overflow-hidden rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#0a090c]/75">
+                                            <div className="relative flex aspect-video items-center justify-center bg-black/25 text-[#8b8597]">
+                                                {card.selectedAssetId && assetMap.get(card.selectedAssetId) ? (
+                                                    <img src={getAssetCoverUrl(assetMap.get(card.selectedAssetId)!)} alt={card.title} className="h-full w-full object-cover" />
+                                                ) : (
+                                                    <Image className="size-6" />
+                                                )}
+                                                <span className="absolute left-2 top-2 rounded-full bg-[#0c0b0e]/80 px-2 py-1 font-mono text-[0.625rem] text-[#f2ede4]">{String(card.order).padStart(2, "0")}</span>
+                                            </div>
+                                        </div>
                                         <div className="min-w-0 flex-1">
-                                            <div className="mb-2 flex items-center gap-2">
+                                            <div className="mb-2 flex flex-wrap items-center gap-2">
                                                 <h3 className="text-base font-semibold text-[#f2ede4]">{card.title}</h3>
                                                 {card.hasDialogue ? <Tag color="blue">对白</Tag> : null}
+                                                <Tag color={storyboardStatusColor(card.status)}>{storyboardStatusLabel(card.status)}</Tag>
                                                 <Tag color={card.hasReadyReferences ? "success" : card.hasExplicitReferences ? "warning" : "default"}>
                                                     {card.hasReadyReferences ? "引用 ready" : card.hasExplicitReferences ? `引用 ${card.referenceCount}` : "引用缺失"}
                                                 </Tag>
                                                 <Tag color="default">候选 {card.candidateCount}</Tag>
                                             </div>
                                             <p className="whitespace-pre-wrap text-sm leading-7 text-[#a8a2b0]">{card.prompt}</p>
+                                            {card.referenceChips.length ? (
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {card.referenceChips.map((chip) => (
+                                                        <Tag key={`${chip.kind}-${chip.id}`} color={chip.ready ? "success" : "warning"}>
+                                                            {storyboardReferenceKindLabel(chip.kind)} · {chip.label}
+                                                        </Tag>
+                                                    ))}
+                                                </div>
+                                            ) : null}
+                                            {card.missingReferenceChips.length ? (
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {card.missingReferenceChips.map((chip) => (
+                                                        <Tag key={`missing-${chip.kind}-${chip.id}`} color="orange">
+                                                            缺 {storyboardReferenceKindLabel(chip.kind)}主图 · {chip.label}
+                                                        </Tag>
+                                                    ))}
+                                                </div>
+                                            ) : null}
+                                            {card.lastError ? <p className="mt-2 text-xs text-[#ff8a8a]">{card.lastError}</p> : null}
                                         </div>
                                     </div>
                                 </article>
@@ -1267,6 +1413,7 @@ function StoryboardStep({ episode, onJumpToScript, onOpenWorkbench }: { episode:
                         <PreflightRow passed={episode.script.trim().length >= 40} title="剧本文本足够长" hint="建议先在 Script 中保存完整剧本。" />
                         <PreflightRow passed={episode.characters.length > 0} title="已有角色清单" hint="先提取或手动保存 characters。" />
                         <PreflightRow passed={cards.length > 0} title="已有分镜草稿" hint="解析剧本后会写入 shotDrafts。" />
+                        <PreflightRow passed={cards.every((card) => !card.missingReferenceChips.length)} title="显式引用有主参考图" hint="缺失项会在镜头卡片上标出具体角色、场景或道具。" />
                         {!canGenerate ? (
                             <Button className={studioSecondaryButtonClass} block onClick={onJumpToScript}>
                                 回到 Script 修正
@@ -1289,6 +1436,8 @@ function ShotWorkbenchModal({
     onSavePrompt,
     onSaveReferences,
     onGenerate,
+    onSelectReference,
+    onRemoveCandidate,
     onClose,
 }: {
     open: boolean;
@@ -1300,6 +1449,8 @@ function ShotWorkbenchModal({
     onSavePrompt: (shotId: string, prompt: string) => void;
     onSaveReferences: (shotId: string, references: StudioShotReferences) => void;
     onGenerate: (shotId: string, prompt: string, references: StudioShotReferences, count: 1 | 2 | 4, allowNoReferences: boolean) => void;
+    onSelectReference: (shotId: string, assetId: string) => void;
+    onRemoveCandidate: (shotId: string, assetId: string) => void;
     onClose: () => void;
 }) {
     const shot = useMemo(() => (shotId ? episode.shots.find((item) => item.id === shotId) : null), [episode.shots, shotId]);
@@ -1322,6 +1473,9 @@ function ShotWorkbenchModal({
 
     const readyReferences = collectReadyShotReferenceAssets(episode, references, assetMap);
     const explicitReferenceCount = references.characterIds.length + references.sceneIds.length + references.propIds.length;
+    const imageRefs = shot.assetRefs.filter((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate"));
+    const selectedImageRef = imageRefs.find((ref) => ref.role === "selected");
+    const selectedImageAsset = selectedImageRef ? assetMap.get(selectedImageRef.assetId) : undefined;
     const effectivePrompt = prompt.trim() ? `${prompt.trim()}${style?.positivePrompt ? `\n\nStyle baseline:\n${style.positivePrompt}` : ""}` : "";
     const generateDisabled = generating || !prompt.trim() || !style || !imageModelReady || (!readyReferences.length && !allowNoReferences);
 
@@ -1455,26 +1609,51 @@ function ShotWorkbenchModal({
                         <ReferenceSelect label="道具" value={references.propIds} options={episode.props.map((item) => ({ label: item.name, value: item.id }))} onChange={(propIds) => setReferences({ ...references, propIds })} />
 
                         <div className="mt-5">
+                            <p className="mb-2 font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Selected</p>
+                            <div className="overflow-hidden rounded-lg border border-[#34d8c4]/35 bg-[#0a090c]/75">
+                                <div className="relative flex aspect-video items-center justify-center bg-black/25 text-[#8b8597]">
+                                    {selectedImageAsset && selectedImageAsset.kind === "image" ? <img src={getAssetCoverUrl(selectedImageAsset)} alt={`${shot.title} selected`} className="h-full w-full object-cover" /> : <Image className="size-7" />}
+                                    {selectedImageRef ? <span className="absolute left-2 top-2 rounded-full bg-[#34d8c4] px-2 py-1 text-[0.625rem] font-semibold text-[#0c0b0e]">selected</span> : null}
+                                </div>
+                                {selectedImageRef ? (
+                                    <div className="space-y-1 px-3 py-2 text-xs leading-5 text-[#a8a2b0]">
+                                        {formatGenerationSummary(selectedImageRef.metadata).map((line) => (
+                                            <p key={line}>{line}</p>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="px-3 py-2 text-xs text-[#8b8597]">还没有主图。</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="mt-5">
                             <p className="mb-2 font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Gallery</p>
                             <div className="grid grid-cols-2 gap-2">
-                                {shot.assetRefs
-                                    .filter((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate"))
-                                    .map((ref) => {
-                                        const asset = assetMap.get(ref.assetId);
-                                        const src = asset ? getAssetCoverUrl(asset) : "";
-                                        return (
-                                            <div key={`${ref.assetId}-${ref.role}`} className={cn("overflow-hidden rounded-lg border bg-[#0a090c]/75", ref.role === "selected" ? "border-[#34d8c4]/55" : "border-[rgba(255,255,255,0.06)]")}>
-                                                <div className="relative flex aspect-[4/3] items-center justify-center bg-black/25 text-[#8b8597]">
-                                                    {src ? <img src={src} alt="Storyboard candidate" className="h-full w-full object-cover" /> : <Image className="size-6" />}
-                                                    {ref.role === "selected" ? <span className="absolute left-2 top-2 rounded-full bg-[#34d8c4] px-2 py-1 text-[0.625rem] font-semibold text-[#0c0b0e]">selected</span> : null}
-                                                </div>
+                                {imageRefs.map((ref) => {
+                                    const asset = assetMap.get(ref.assetId);
+                                    const src = asset ? getAssetCoverUrl(asset) : "";
+                                    return (
+                                        <div key={`${ref.assetId}-${ref.role}`} className={cn("overflow-hidden rounded-lg border bg-[#0a090c]/75", ref.role === "selected" ? "border-[#34d8c4]/55" : "border-[rgba(255,255,255,0.06)]")}>
+                                            <div className="relative flex aspect-[4/3] items-center justify-center bg-black/25 text-[#8b8597]">
+                                                {src ? <img src={src} alt="Storyboard candidate" className="h-full w-full object-cover" /> : <Image className="size-6" />}
+                                                {ref.role === "selected" ? <span className="absolute left-2 top-2 rounded-full bg-[#34d8c4] px-2 py-1 text-[0.625rem] font-semibold text-[#0c0b0e]">selected</span> : null}
                                             </div>
-                                        );
-                                    })}
+                                            {ref.role === "candidate" ? (
+                                                <div className="flex items-center gap-1 p-1.5">
+                                                    <Tooltip title="设为主图">
+                                                        <Button className="!size-7 !rounded-full" size="small" icon={<Star className="size-3.5" />} onClick={() => onSelectReference(shotId, ref.assetId)} />
+                                                    </Tooltip>
+                                                    <Tooltip title="移除候选关系">
+                                                        <Button className="!size-7 !rounded-full" size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => onRemoveCandidate(shotId, ref.assetId)} />
+                                                    </Tooltip>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
                             </div>
-                            {!shot.assetRefs.some((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate")) ? (
-                                <div className="rounded-lg border border-dashed border-[rgba(255,255,255,0.10)] p-6 text-center text-sm text-[#8b8597]">还没有候选图</div>
-                            ) : null}
+                            {!imageRefs.length ? <div className="rounded-lg border border-dashed border-[rgba(255,255,255,0.10)] p-6 text-center text-sm text-[#8b8597]">还没有候选图</div> : null}
                         </div>
                     </aside>
                 </div>
@@ -1502,6 +1681,38 @@ function readShotReferences(shot: StudioEpisode["shots"][number]): StudioShotRef
 
 function buildShotPromptFallback(shot: Pick<StudioEpisode["shots"][number], "description" | "dialogue">) {
     return [shot.description.trim(), shot.dialogue?.trim() ? `对白：${shot.dialogue.trim()}` : ""].filter(Boolean).join("\n");
+}
+
+function storyboardStatusLabel(status: ReturnType<typeof buildStoryboardCards>[number]["status"]) {
+    if (status === "ready") return "ready";
+    if (status === "generating") return "generating";
+    if (status === "failed") return "failed";
+    return "pending";
+}
+
+function storyboardStatusColor(status: ReturnType<typeof buildStoryboardCards>[number]["status"]) {
+    if (status === "ready") return "success";
+    if (status === "generating") return "processing";
+    if (status === "failed") return "error";
+    return "default";
+}
+
+function storyboardReferenceKindLabel(kind: ReturnType<typeof buildStoryboardCards>[number]["referenceChips"][number]["kind"]) {
+    if (kind === "character") return "角色";
+    if (kind === "scene") return "场景";
+    return "道具";
+}
+
+function formatGenerationSummary(metadata: Record<string, unknown> | undefined) {
+    if (!metadata) return ["无生成参数摘要"];
+    const lines = [
+        typeof metadata.model === "string" ? `Model: ${metadata.model}` : "",
+        typeof metadata.count === "number" ? `Count: ${metadata.count}` : "",
+        typeof metadata.aspectRatio === "string" ? `Aspect: ${metadata.aspectRatio}` : "",
+        Array.isArray(metadata.referenceAssetIds) ? `Refs: ${metadata.referenceAssetIds.length}` : "",
+        typeof metadata.generatedAt === "string" ? `Generated: ${metadata.generatedAt}` : typeof metadata.createdAt === "string" ? `Created: ${metadata.createdAt}` : "",
+    ].filter(Boolean);
+    return lines.length ? lines : ["无生成参数摘要"];
 }
 
 function collectReadyShotReferenceAssets(episode: StudioEpisode, references: StudioShotReferences, assetMap: Map<string, Asset>) {

@@ -57,10 +57,37 @@ export type StudioStoryboardCard = {
     order: number;
     prompt: string;
     hasDialogue: boolean;
+    status: "ready" | "pending" | "generating" | "failed";
+    selectedAssetId?: string;
     candidateCount: number;
     referenceCount: number;
     hasExplicitReferences: boolean;
     hasReadyReferences: boolean;
+    lastError?: string;
+    referenceChips: StudioStoryboardReferenceChip[];
+    missingReferenceChips: StudioStoryboardMissingReferenceChip[];
+    generationSummary?: {
+        model?: string;
+        count?: number;
+        aspectRatio?: string;
+        referenceAssetIds?: string[];
+        generatedAt?: string;
+    };
+};
+
+export type StudioStoryboardReferenceChip = {
+    kind: "character" | "scene" | "prop";
+    id: string;
+    label: string;
+    ready: boolean;
+    selectedAssetId?: string;
+};
+
+export type StudioStoryboardMissingReferenceChip = {
+    kind: StudioStoryboardReferenceChip["kind"];
+    id: string;
+    label: string;
+    reason: "missing-selected-image" | "missing-entity";
 };
 
 export type StudioModelPreferenceKey = keyof StudioSeries["modelPreferences"];
@@ -262,21 +289,33 @@ export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCa
             const prompt = shot.prompt?.trim() || buildShotPromptFallback(shot);
             const references = readShotReferences(shot);
             const referencedIds = [...references.characterIds, ...references.sceneIds, ...references.propIds];
-            const readyReferenceIds = new Set([
-                ...episode.characters.filter((item) => references.characterIds.includes(item.id) && getSelectedImageRef(item.assetRefs)).map((item) => item.id),
-                ...episode.scenes.filter((item) => references.sceneIds.includes(item.id) && getSelectedImageRef(item.assetRefs)).map((item) => item.id),
-                ...episode.props.filter((item) => references.propIds.includes(item.id) && getSelectedImageRef(item.assetRefs)).map((item) => item.id),
-            ]);
+            const selectedRef = getSelectedImageRef(shot.assetRefs);
+            const generation = readShotImageGeneration(shot.generation);
+            const referenceChips = buildStoryboardReferenceChips(episode, references);
+            const missingReferenceChips = referenceChips
+                .filter((chip) => !chip.ready)
+                .map((chip) => ({
+                    kind: chip.kind,
+                    id: chip.id,
+                    label: chip.label,
+                    reason: chip.label ? ("missing-selected-image" as const) : ("missing-entity" as const),
+                }));
             return {
                 id: shot.id,
                 title: shot.title,
                 order: shot.order,
                 prompt,
                 hasDialogue: Boolean(shot.dialogue?.trim()),
+                status: readShotStatus(Boolean(selectedRef), generation),
+                selectedAssetId: selectedRef?.assetId,
                 candidateCount: shot.assetRefs.filter((ref) => ref.role === "candidate" || ref.role === "selected").length,
                 referenceCount: referencedIds.length,
                 hasExplicitReferences: referencedIds.length > 0,
-                hasReadyReferences: referencedIds.length > 0 && referencedIds.every((id) => readyReferenceIds.has(id)),
+                hasReadyReferences: referencedIds.length > 0 && referenceChips.length === referencedIds.length && referenceChips.every((chip) => chip.ready),
+                lastError: generation.lastImageError,
+                referenceChips,
+                missingReferenceChips,
+                generationSummary: readStoryboardGenerationSummary(selectedRef),
             };
         });
 }
@@ -319,6 +358,26 @@ function getSelectedImageRef(refs: StudioAssetRef[]) {
     return refs.find((ref) => ref.kind === "image" && ref.role === "selected");
 }
 
+function buildStoryboardReferenceChips(episode: StudioEpisode, references: ReturnType<typeof readShotReferences>): StudioStoryboardReferenceChip[] {
+    return [
+        ...references.characterIds.map((id) => buildStoryboardReferenceChip("character", id, episode.characters)),
+        ...references.sceneIds.map((id) => buildStoryboardReferenceChip("scene", id, episode.scenes)),
+        ...references.propIds.map((id) => buildStoryboardReferenceChip("prop", id, episode.props)),
+    ];
+}
+
+function buildStoryboardReferenceChip(kind: StudioStoryboardReferenceChip["kind"], id: string, entities: Array<{ id: string; name: string; assetRefs: StudioAssetRef[] }>): StudioStoryboardReferenceChip {
+    const entity = entities.find((item) => item.id === id);
+    const selectedRef = entity ? getSelectedImageRef(entity.assetRefs) : undefined;
+    return {
+        kind,
+        id,
+        label: entity?.name ?? id,
+        ready: Boolean(selectedRef),
+        selectedAssetId: selectedRef?.assetId,
+    };
+}
+
 function readShotReferences(shot: StudioEpisode["shots"][number]) {
     return {
         characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
@@ -347,11 +406,41 @@ function readCastImageGeneration(generation: Record<string, unknown> | undefined
     };
 }
 
+function readShotImageGeneration(generation: Record<string, unknown> | undefined): { status?: string; lastImageError?: string } {
+    const image = generation?.image;
+    if (!image || typeof image !== "object") return {};
+    const draft = image as { status?: unknown; lastImageError?: unknown };
+    return {
+        status: typeof draft.status === "string" ? draft.status : undefined,
+        lastImageError: typeof draft.lastImageError === "string" ? draft.lastImageError : undefined,
+    };
+}
+
 function readCastStatus(hasSelectedImage: boolean, imageGeneration: { status?: string }): StudioCastItem["status"] {
     if (imageGeneration.status === "processing") return "generating";
     if (hasSelectedImage) return "ready";
     if (imageGeneration.status === "failed") return "failed";
     return "pending";
+}
+
+function readShotStatus(hasSelectedImage: boolean, imageGeneration: { status?: string }): StudioStoryboardCard["status"] {
+    if (imageGeneration.status === "processing") return "generating";
+    if (hasSelectedImage) return "ready";
+    if (imageGeneration.status === "failed") return "failed";
+    return "pending";
+}
+
+function readStoryboardGenerationSummary(selectedRef: StudioAssetRef | undefined): StudioStoryboardCard["generationSummary"] {
+    const metadata = selectedRef?.metadata;
+    if (!metadata) return undefined;
+    const referenceAssetIds = Array.isArray(metadata.referenceAssetIds) ? metadata.referenceAssetIds.filter((id): id is string => typeof id === "string") : undefined;
+    return {
+        model: typeof metadata.model === "string" ? metadata.model : undefined,
+        count: typeof metadata.count === "number" ? metadata.count : undefined,
+        aspectRatio: typeof metadata.aspectRatio === "string" ? metadata.aspectRatio : undefined,
+        referenceAssetIds,
+        generatedAt: typeof metadata.generatedAt === "string" ? metadata.generatedAt : typeof metadata.createdAt === "string" ? metadata.createdAt : undefined,
+    };
 }
 
 function buildCastPromptFallback(kind: StudioCastItem["kind"], name: string, description: string) {

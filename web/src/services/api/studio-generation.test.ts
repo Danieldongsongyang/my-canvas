@@ -3,13 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createInMemoryStudioStorage, createStudioRepository } from "@/services/studio-local";
 import {
     addCastAssetReference,
+    generateMissingStoryboardShotImages,
     generateStoryboardShotImages,
     generateCastReferences,
     normalizeScriptStructure,
     parseAndApplyScript,
     parseScript,
     removeCastCandidateReference,
+    removeStoryboardShotCandidateReference,
     selectCastAssetReference,
+    selectStoryboardShotAssetReference,
     StudioGenerationError,
     updateCastEntityPrompt,
     updateShotPrompt,
@@ -981,5 +984,168 @@ describe("studio generation adapter", () => {
             { assetId: "asset-one", kind: "image", role: "candidate" },
             { assetId: "asset-two", kind: "image", role: "candidate" },
         ]);
+    });
+
+    it("promotes a storyboard candidate to selected, demotes the previous selected and keeps one selected image", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            shots: [
+                {
+                    id: "shot-1",
+                    title: "开场",
+                    order: 1,
+                    description: "描述",
+                    assetRefs: [
+                        { assetId: "asset-old", kind: "image", role: "selected", metadata: { source: "studio-storyboard" } },
+                        { assetId: "asset-next", kind: "image", role: "candidate", metadata: { source: "studio-storyboard" } },
+                        { assetId: "asset-duplicate-selected", kind: "image", role: "selected" },
+                    ],
+                },
+            ],
+        });
+
+        const result = await selectStoryboardShotAssetReference({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            shotId: "shot-1",
+            assetId: "asset-next",
+        });
+
+        expect(result.episode.shots[0].assetRefs).toEqual([
+            { assetId: "asset-old", kind: "image", role: "candidate", metadata: { source: "studio-storyboard" } },
+            { assetId: "asset-next", kind: "image", role: "selected", metadata: { source: "studio-storyboard" } },
+            { assetId: "asset-duplicate-selected", kind: "image", role: "candidate" },
+        ]);
+        expect(result.episode.shots[0].assetRefs.filter((ref) => ref.kind === "image" && ref.role === "selected")).toHaveLength(1);
+    });
+
+    it("removes only storyboard candidate refs without deleting or mutating selected refs", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            shots: [
+                {
+                    id: "shot-1",
+                    title: "开场",
+                    order: 1,
+                    description: "描述",
+                    assetRefs: [
+                        { assetId: "asset-selected", kind: "image", role: "selected" },
+                        { assetId: "asset-remove", kind: "image", role: "candidate", metadata: { batchId: "batch-1" } },
+                        { assetId: "asset-keep", kind: "image", role: "candidate" },
+                    ],
+                    generation: { image: { status: "completed", lastEffectivePrompt: "保留生成摘要" } },
+                },
+            ],
+        });
+
+        const result = await removeStoryboardShotCandidateReference({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            shotId: "shot-1",
+            assetId: "asset-remove",
+        });
+
+        expect(result.episode.shots[0]).toMatchObject({
+            assetRefs: [
+                { assetId: "asset-selected", kind: "image", role: "selected" },
+                { assetId: "asset-keep", kind: "image", role: "candidate" },
+            ],
+            generation: { image: { status: "completed", lastEffectivePrompt: "保留生成摘要" } },
+        });
+
+        await expect(
+            removeStoryboardShotCandidateReference({
+                repository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                shotId: "shot-1",
+                assetId: "asset-selected",
+            }),
+        ).rejects.toThrow("只能移除 candidate 分镜图");
+    });
+
+    it("batch-generates missing storyboard shots, skips shots without explicit refs and records failed retries", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const series = await repository.createSeries({ title: "山海便利店" });
+        const episode = series.episodes[0];
+        await repository.updateEpisode(series.id, episode.id, {
+            characters: [{ id: "char-1", name: "阿岚", description: "夜班店员", prompt: "阿岚", assetRefs: [{ assetId: "asset-char", kind: "image", role: "selected" }] }],
+            scenes: [{ id: "scene-1", name: "便利店", description: "雨夜", prompt: "便利店", assetRefs: [] }],
+            shots: [
+                {
+                    id: "shot-ready",
+                    title: "已有图",
+                    order: 1,
+                    description: "描述",
+                    prompt: "已有图 prompt",
+                    assetRefs: [{ assetId: "asset-shot-ready", kind: "image", role: "selected" }],
+                    metadata: { references: { characterIds: ["char-1"], sceneIds: [], propIds: [] } },
+                },
+                { id: "shot-generate", title: "待生成", order: 2, description: "描述", prompt: "待生成 prompt", assetRefs: [], metadata: { references: { characterIds: ["char-1"], sceneIds: [], propIds: [] } } },
+                { id: "shot-missing-ref", title: "缺参考图", order: 3, description: "描述", prompt: "缺参考 prompt", assetRefs: [], metadata: { references: { characterIds: [], sceneIds: ["scene-1"], propIds: [] } } },
+                { id: "shot-no-refs", title: "无引用", order: 4, description: "描述", prompt: "无引用 prompt", assetRefs: [], metadata: { references: { characterIds: [], sceneIds: [], propIds: [] } } },
+                {
+                    id: "shot-failed",
+                    title: "失败重试",
+                    order: 5,
+                    description: "描述",
+                    prompt: "失败 prompt",
+                    assetRefs: [],
+                    generation: { image: { status: "failed", lastImageError: "旧错误" } },
+                    metadata: { references: { characterIds: ["char-1"], sceneIds: [], propIds: [] } },
+                },
+            ],
+            generation: { artDirection: { status: "completed", name: "风格", positivePrompt: "style", negativePrompt: "", savedAt: "" } },
+        });
+        const assets = [
+            {
+                id: "asset-char",
+                kind: "image" as const,
+                title: "阿岚",
+                coverUrl: "blob:char",
+                tags: [],
+                source: "Studio Cast",
+                data: { dataUrl: "blob:char", storageKey: "char-key", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" },
+                createdAt: "",
+                updatedAt: "",
+            },
+        ];
+        const requestEdit = vi.fn(async (_nextConfig: AiConfig, prompt: string) => {
+            if (prompt.includes("失败 prompt")) throw new Error("重试仍失败");
+            return [{ id: "image-1", dataUrl: "data:image/png;base64,SHOT" }];
+        });
+        const storeImage = vi.fn(async () => ({ url: "blob:shot", storageKey: "image:shot", width: 1280, height: 720, bytes: 333, mimeType: "image/png" }));
+        const addAsset = vi.fn(() => "asset-shot-new");
+
+        const result = await generateMissingStoryboardShotImages({
+            repository,
+            seriesId: series.id,
+            episodeId: episode.id,
+            config,
+            assets,
+            target: { mode: "allMissing" },
+            count: 1,
+            requestEdit,
+            storeImage,
+            addAsset,
+            now: () => "2026-07-03T14:00:00.000Z",
+        });
+
+        expect(requestEdit).toHaveBeenCalledTimes(2);
+        expect(result.results).toMatchObject([
+            { shotId: "shot-generate", status: "completed", createdAssetIds: ["asset-shot-new"], selectedAssetId: "asset-shot-new" },
+            { shotId: "shot-missing-ref", status: "skipped", reason: "missing-reference-images" },
+            { shotId: "shot-no-refs", status: "skipped", reason: "no-explicit-references" },
+            { shotId: "shot-failed", status: "failed", error: "重试仍失败" },
+        ]);
+        expect(result.episode.shots.find((shot) => shot.id === "shot-ready")?.assetRefs).toEqual([{ assetId: "asset-shot-ready", kind: "image", role: "selected" }]);
+        expect(result.episode.shots.find((shot) => shot.id === "shot-generate")?.assetRefs).toMatchObject([{ assetId: "asset-shot-new", kind: "image", role: "selected" }]);
+        expect(result.episode.shots.find((shot) => shot.id === "shot-failed")?.generation).toMatchObject({ image: { status: "failed", lastImageError: "重试仍失败" } });
     });
 });

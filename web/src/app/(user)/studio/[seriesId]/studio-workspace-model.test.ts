@@ -219,6 +219,7 @@ describe("studio workspace model", () => {
         expect(
             buildStoryboardCards(
                 episode({
+                    characters: [{ id: "c1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] }],
                     shots: [
                         { id: "shot-2", title: "第二镜", order: 2, description: "青蛇回头", dialogue: "你终于来了。", prompt: "用户精修 prompt", assetRefs: [], metadata: { references: { characterIds: ["c1"], sceneIds: [], propIds: [] } } },
                         { id: "shot-1", title: "第一镜", order: 1, description: "雨落在玻璃门上", assetRefs: [] },
@@ -226,8 +227,94 @@ describe("studio workspace model", () => {
                 }),
             ),
         ).toMatchObject([
-            { id: "shot-1", title: "第一镜", order: 1, prompt: "雨落在玻璃门上", hasDialogue: false, referenceCount: 0, hasExplicitReferences: false, hasReadyReferences: false },
-            { id: "shot-2", title: "第二镜", order: 2, prompt: "用户精修 prompt", hasDialogue: true, referenceCount: 1, hasExplicitReferences: true, hasReadyReferences: false },
+            { id: "shot-1", title: "第一镜", order: 1, prompt: "雨落在玻璃门上", hasDialogue: false, referenceCount: 0, hasExplicitReferences: false, hasReadyReferences: false, status: "pending" },
+            { id: "shot-2", title: "第二镜", order: 2, prompt: "用户精修 prompt", hasDialogue: true, referenceCount: 1, hasExplicitReferences: true, hasReadyReferences: false, status: "pending" },
+        ]);
+    });
+
+    it("derives Storyboard selected image, status, reference chips and missing reference chips", () => {
+        const cards = buildStoryboardCards(
+            episode({
+                characters: [
+                    { id: "c1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [{ assetId: "asset-char", kind: "image", role: "selected" }] },
+                    { id: "c2", name: "青蛇", description: "神秘访客", prompt: "青蛇角色参考图", assetRefs: [] },
+                ],
+                scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", prompt: "便利店场景参考图", assetRefs: [{ assetId: "asset-scene", kind: "image", role: "selected" }] }],
+                props: [{ id: "p1", name: "贝壳", description: "发光", prompt: "贝壳道具参考图", assetRefs: [] }],
+                shots: [
+                    {
+                        id: "ready-shot",
+                        title: "主图已选",
+                        order: 1,
+                        description: "描述",
+                        prompt: "ready prompt",
+                        assetRefs: [
+                            { assetId: "asset-shot-selected", kind: "image", role: "selected", metadata: { model: "gpt-image-1", count: 1, referenceAssetIds: ["asset-char"] } },
+                            { assetId: "asset-shot-candidate", kind: "image", role: "candidate" },
+                        ],
+                        metadata: { references: { characterIds: ["c1"], sceneIds: ["s1"], propIds: [] } },
+                    },
+                    {
+                        id: "missing-shot",
+                        title: "缺参考",
+                        order: 2,
+                        description: "描述",
+                        prompt: "missing prompt",
+                        assetRefs: [],
+                        metadata: { references: { characterIds: ["c2"], sceneIds: [], propIds: ["p1"] } },
+                    },
+                    {
+                        id: "failed-shot",
+                        title: "失败",
+                        order: 3,
+                        description: "描述",
+                        prompt: "failed prompt",
+                        assetRefs: [],
+                        generation: { image: { status: "failed", lastImageError: "接口超时" } },
+                        metadata: { references: { characterIds: ["c1"], sceneIds: [], propIds: [] } },
+                    },
+                    {
+                        id: "generating-shot",
+                        title: "生成中",
+                        order: 4,
+                        description: "描述",
+                        prompt: "generating prompt",
+                        assetRefs: [],
+                        generation: { image: { status: "processing" } },
+                        metadata: { references: { characterIds: ["c1"], sceneIds: [], propIds: [] } },
+                    },
+                ],
+            }),
+        );
+
+        expect(cards).toMatchObject([
+            {
+                id: "ready-shot",
+                status: "ready",
+                selectedAssetId: "asset-shot-selected",
+                candidateCount: 2,
+                generationSummary: { model: "gpt-image-1", count: 1, referenceAssetIds: ["asset-char"] },
+                referenceChips: [
+                    { kind: "character", id: "c1", label: "阿岚", ready: true, selectedAssetId: "asset-char" },
+                    { kind: "scene", id: "s1", label: "便利店", ready: true, selectedAssetId: "asset-scene" },
+                ],
+                missingReferenceChips: [],
+            },
+            {
+                id: "missing-shot",
+                status: "pending",
+                selectedAssetId: undefined,
+                referenceChips: [
+                    { kind: "character", id: "c2", label: "青蛇", ready: false },
+                    { kind: "prop", id: "p1", label: "贝壳", ready: false },
+                ],
+                missingReferenceChips: [
+                    { kind: "character", id: "c2", label: "青蛇", reason: "missing-selected-image" },
+                    { kind: "prop", id: "p1", label: "贝壳", reason: "missing-selected-image" },
+                ],
+            },
+            { id: "failed-shot", status: "failed", lastError: "接口超时" },
+            { id: "generating-shot", status: "generating" },
         ]);
     });
 });

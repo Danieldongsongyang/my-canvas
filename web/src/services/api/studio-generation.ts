@@ -154,6 +154,38 @@ export type GenerateStoryboardShotImagesResult = {
     selectedAssetId?: string;
 };
 
+export type SelectStoryboardShotAssetReferenceInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    shotId: string;
+    assetId: string;
+};
+
+export type RemoveStoryboardShotCandidateReferenceInput = SelectStoryboardShotAssetReferenceInput;
+
+export type GenerateStoryboardShotTarget = { mode: "allMissing" } | { mode: "failedOnly" } | { mode: "ids"; ids: string[] };
+
+export type GenerateStoryboardShotTargetResult = {
+    shotId: string;
+    title: string;
+    status: "completed" | "failed" | "skipped";
+    createdAssetIds: string[];
+    selectedAssetId?: string;
+    reason?: "no-explicit-references" | "missing-reference-images";
+    error?: string;
+};
+
+export type GenerateMissingStoryboardShotImagesInput = Omit<GenerateStoryboardShotImagesInput, "shotId" | "allowNoReferences" | "requestGeneration"> & {
+    target: GenerateStoryboardShotTarget;
+};
+
+export type GenerateMissingStoryboardShotImagesResult = {
+    series: StudioSeries;
+    episode: StudioEpisode;
+    results: GenerateStoryboardShotTargetResult[];
+};
+
 type ChatCompletionPayload = {
     model: string;
     messages: StudioChatMessage[];
@@ -581,6 +613,93 @@ export async function generateStoryboardShotImages(input: GenerateStoryboardShot
     return { ...updated, createdAssetIds, selectedAssetId: getSelectedImageRef(updatedShot)?.assetId };
 }
 
+export async function selectStoryboardShotAssetReference(input: SelectStoryboardShotAssetReferenceInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const shot = episode.shots.find((item) => item.id === input.shotId);
+    if (!shot) throw new StudioGenerationError("镜头不存在。");
+    if (!shot.assetRefs.some((ref) => ref.kind === "image" && ref.assetId === input.assetId)) throw new StudioGenerationError("分镜图不存在。");
+
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, {
+        shots: episode.shots.map((item) => (item.id === input.shotId ? { ...item, assetRefs: selectImageAssetRef(item.assetRefs, input.assetId) } : item)),
+    });
+}
+
+export async function removeStoryboardShotCandidateReference(input: RemoveStoryboardShotCandidateReferenceInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const shot = episode.shots.find((item) => item.id === input.shotId);
+    if (!shot) throw new StudioGenerationError("镜头不存在。");
+
+    const targetRef = shot.assetRefs.find((ref) => ref.kind === "image" && ref.assetId === input.assetId);
+    if (!targetRef) return { series, episode };
+    if (targetRef.role !== "candidate") throw new StudioGenerationError("只能移除 candidate 分镜图。");
+
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, {
+        shots: episode.shots.map((item) => (item.id === input.shotId ? { ...item, assetRefs: item.assetRefs.filter((ref) => !(ref.kind === "image" && ref.assetId === input.assetId && ref.role === "candidate")) } : item)),
+    });
+}
+
+export async function generateMissingStoryboardShotImages(input: GenerateMissingStoryboardShotImagesInput): Promise<GenerateMissingStoryboardShotImagesResult> {
+    const currentSeries = await input.repository.getSeries(input.seriesId);
+    const currentEpisode = currentSeries?.episodes.find((item) => item.id === input.episodeId);
+    if (!currentSeries || !currentEpisode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const artDirection = readStudioArtDirection(currentEpisode);
+    if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
+    const model = currentSeries.modelPreferences.imageModel || input.config.imageModel;
+    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+
+    let series = currentSeries;
+    let episode = currentEpisode;
+    const results: GenerateStoryboardShotTargetResult[] = [];
+
+    for (const target of selectStoryboardShotTargets(episode, input.target)) {
+        const shot = episode.shots.find((item) => item.id === target.id);
+        if (!shot) continue;
+        const referenceCount = countShotReferences(shot);
+        const readyReferenceCount = collectStoryboardReferenceImages(episode, shot, input.assets).length;
+        if (!referenceCount) {
+            results.push({ shotId: shot.id, title: shot.title, status: "skipped", createdAssetIds: [], reason: "no-explicit-references" });
+            continue;
+        }
+        if (readyReferenceCount < referenceCount) {
+            results.push({ shotId: shot.id, title: shot.title, status: "skipped", createdAssetIds: [], reason: "missing-reference-images" });
+            continue;
+        }
+        try {
+            const generated = await generateStoryboardShotImages({
+                ...input,
+                shotId: shot.id,
+                allowNoReferences: false,
+            });
+            series = generated.series;
+            episode = generated.episode;
+            results.push({
+                shotId: shot.id,
+                title: shot.title,
+                status: "completed",
+                createdAssetIds: generated.createdAssetIds,
+                selectedAssetId: generated.selectedAssetId,
+            });
+        } catch (error) {
+            const failed = await markStoryboardShotImageFailed({
+                repository: input.repository,
+                seriesId: input.seriesId,
+                episodeId: input.episodeId,
+                shotId: shot.id,
+                error: readGenerationError(error),
+            });
+            series = failed.series;
+            episode = failed.episode;
+            results.push({ shotId: shot.id, title: shot.title, status: "failed", createdAssetIds: [], error: readGenerationError(error) });
+        }
+    }
+
+    return { series, episode, results };
+}
+
 type StudioCastEntity = StudioCharacter | StudioScene | StudioProp;
 
 type StudioArtDirectionSnapshot = {
@@ -651,6 +770,23 @@ function selectCastTargets(episode: StudioEpisode, target: GenerateCastTarget): 
             return !getSelectedImageRef(entity);
         })
         .map(({ kind, entity }) => ({ kind, id: entity.id }));
+}
+
+function selectStoryboardShotTargets(episode: StudioEpisode, target: GenerateStoryboardShotTarget): Array<{ id: string }> {
+    if (target.mode === "ids") {
+        const ids = new Set(target.ids);
+        return episode.shots.filter((shot) => ids.has(shot.id)).map((shot) => ({ id: shot.id }));
+    }
+
+    return episode.shots
+        .filter((shot) => {
+            const status = readShotImageGenerationStatus(shot);
+            if (status === "processing") return false;
+            if (target.mode === "failedOnly") return status === "failed";
+            return !getSelectedImageRef(shot) || status === "failed";
+        })
+        .sort((a, b) => a.order - b.order)
+        .map((shot) => ({ id: shot.id }));
 }
 
 function castEntities(episode: StudioEpisode, kind: StudioCastTargetKind): StudioCastEntity[] {
@@ -736,6 +872,11 @@ function readShotReferences(shot: StudioShot): StudioShotReferences {
     };
 }
 
+function countShotReferences(shot: StudioShot) {
+    const references = readShotReferences(shot);
+    return references.characterIds.length + references.sceneIds.length + references.propIds.length;
+}
+
 function collectStoryboardReferenceImages(episode: StudioEpisode, shot: StudioShot, assets: Asset[]): ReferenceImage[] {
     const assetMap = new Map(assets.filter((asset) => asset.kind === "image").map((asset) => [asset.id, asset]));
     const refs = readShotReferences(shot);
@@ -755,6 +896,32 @@ function collectStoryboardReferenceImages(episode: StudioEpisode, shot: StudioSh
         });
     }
     return images;
+}
+
+async function markStoryboardShotImageFailed(input: { repository: StudioRepository; seriesId: string; episodeId: string; shotId: string; error: string }) {
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const shot = episode.shots.find((item) => item.id === input.shotId);
+    if (!shot) throw new StudioGenerationError("镜头不存在。");
+
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, {
+        shots: episode.shots.map((item) =>
+            item.id === input.shotId
+                ? {
+                      ...item,
+                      generation: {
+                          ...item.generation,
+                          image: {
+                              ...((item.generation?.image && typeof item.generation.image === "object" ? item.generation.image : {}) as Record<string, unknown>),
+                              status: "failed",
+                              lastImageError: input.error,
+                          },
+                      },
+                  }
+                : item,
+        ),
+    });
 }
 
 export function buildCastReferencePrompt(kind: StudioCastTargetKind, prompt: string) {
@@ -944,6 +1111,13 @@ function getSelectedImageRef(entity: Pick<StudioCastEntity | StudioShot, "assetR
 
 function readCastImageGenerationStatus(entity: StudioCastEntity) {
     const image = entity.generation?.image;
+    if (!image || typeof image !== "object") return "";
+    const status = (image as { status?: unknown }).status;
+    return typeof status === "string" ? status : "";
+}
+
+function readShotImageGenerationStatus(shot: StudioShot) {
+    const image = shot.generation?.image;
     if (!image || typeof image !== "object") return "";
     const status = (image as { status?: unknown }).status;
     return typeof status === "string" ? status : "";
