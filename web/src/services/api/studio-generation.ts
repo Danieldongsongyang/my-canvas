@@ -3,7 +3,8 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
-import type { StudioEpisodePatch, StudioShot, StudioCharacter, StudioProp, StudioScene, createStudioRepository, StudioEpisode, StudioSeries } from "@/services/studio-local";
+import type { StudioAssetRef, StudioEpisodePatch, StudioShot, StudioCharacter, StudioProp, StudioScene, createStudioRepository, StudioEpisode, StudioSeries } from "@/services/studio-local";
+import type { Asset } from "@/stores/use-asset-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
 export type StudioChatMessage = {
@@ -40,6 +41,70 @@ type ParseAndApplyScriptResult = {
 
 type StudioChatRequester = (config: AiConfig, messages: StudioChatMessage[]) => Promise<string>;
 
+export type StudioCastTargetKind = "character" | "scene" | "prop";
+
+export type GenerateCastTarget = { mode: "allMissing" } | { mode: "failedOnly" } | { mode: "ids"; kind: StudioCastTargetKind; ids: string[] };
+
+export type StudioImageRequester = (config: AiConfig, prompt: string) => Promise<Array<{ id: string; dataUrl: string }>>;
+
+export type StudioImageStorage = (dataUrl: string) => Promise<{
+    url: string;
+    storageKey: string;
+    width: number;
+    height: number;
+    bytes: number;
+    mimeType: string;
+}>;
+
+export type StudioAssetCreator = (asset: Omit<Extract<Asset, { kind: "image" }>, "id" | "createdAt" | "updatedAt">) => string;
+
+export type GenerateCastReferencesInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    config: AiConfig;
+    target: GenerateCastTarget;
+    count: 1 | 2 | 4;
+    addAsset: StudioAssetCreator;
+    requestImages?: StudioImageRequester;
+    storeImage?: StudioImageStorage;
+    now?: () => string;
+};
+
+export type GenerateCastTargetResult = {
+    kind: StudioCastTargetKind;
+    id: string;
+    name: string;
+    status: "completed" | "failed" | "skipped";
+    createdAssetIds: string[];
+    selectedAssetId?: string;
+    error?: string;
+};
+
+export type GenerateCastReferencesResult = {
+    series: StudioSeries;
+    episode: StudioEpisode;
+    results: GenerateCastTargetResult[];
+};
+
+export type SelectCastAssetReferenceInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    kind: StudioCastTargetKind;
+    entityId: string;
+    assetId: string;
+};
+
+export type UpdateCastEntityPromptInput = {
+    repository: StudioRepository;
+    seriesId: string;
+    episodeId: string;
+    kind: StudioCastTargetKind;
+    entityId: string;
+    prompt: string;
+};
+
 type ChatCompletionPayload = {
     model: string;
     messages: StudioChatMessage[];
@@ -50,6 +115,7 @@ type ChatCompletionPayload = {
 const parsedItemSchema = z.object({
     name: z.string().trim().min(1),
     description: z.string().trim().default(""),
+    prompt: z.string().trim().optional(),
 });
 
 const parsedShotSchema = z.object({
@@ -156,6 +222,361 @@ export async function parseAndApplyScript(input: ParseAndApplyScriptInput): Prom
     return { ...result, parseResult };
 }
 
+export async function generateCastReferences(input: GenerateCastReferencesInput): Promise<GenerateCastReferencesResult> {
+    const requestImages = input.requestImages ?? defaultRequestImages;
+    const storeImage = input.storeImage ?? defaultStoreImage;
+    const now = input.now ?? (() => new Date().toISOString());
+    const currentSeries = await input.repository.getSeries(input.seriesId);
+    const currentEpisode = currentSeries?.episodes.find((episode) => episode.id === input.episodeId);
+    if (!currentSeries || !currentEpisode) throw new StudioGenerationError("Studio 剧集不存在。");
+
+    const artDirection = readStudioArtDirection(currentEpisode);
+    if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
+    const model = currentSeries.modelPreferences.imageModel || input.config.imageModel;
+    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+
+    let series = currentSeries;
+    let episode = currentEpisode;
+    const results: GenerateCastTargetResult[] = [];
+    const targets = selectCastTargets(episode, input.target);
+
+    for (const target of targets) {
+        const startedAt = now();
+        const entity = getCastEntity(episode, target.kind, target.id);
+        if (!entity) continue;
+        const snapshot = buildCastGenerationSnapshot({ kind: target.kind, entity, artDirection, model, count: input.count, createdAt: startedAt });
+        try {
+            const images = await requestImages({ ...input.config, model, imageModel: model, count: String(input.count), size: snapshot.aspectRatio }, snapshot.effectivePrompt);
+            if (!images.length) throw new StudioGenerationError("接口没有返回图片");
+            const refs: StudioAssetRef[] = [];
+            const createdAssetIds: string[] = [];
+            for (const [index, image] of images.entries()) {
+                const stored = await storeImage(image.dataUrl);
+                const assetId = input.addAsset({
+                    kind: "image",
+                    title: `${entity.name} 参考图 ${index + 1}`,
+                    coverUrl: stored.url,
+                    tags: ["Studio", "Cast", castKindLabel(target.kind)],
+                    source: "Studio Cast",
+                    data: {
+                        dataUrl: stored.url,
+                        storageKey: stored.storageKey,
+                        width: stored.width,
+                        height: stored.height,
+                        bytes: stored.bytes,
+                        mimeType: stored.mimeType,
+                    },
+                    metadata: {
+                        source: "studio-cast",
+                        seriesId: input.seriesId,
+                        episodeId: input.episodeId,
+                        entityKind: target.kind,
+                        entityId: entity.id,
+                        entityName: entity.name,
+                        prompt: snapshot.prompt,
+                        style: artDirection.name,
+                        stylePrompt: artDirection.positivePrompt,
+                        effectivePrompt: snapshot.effectivePrompt,
+                        negativePrompt: snapshot.negativePrompt,
+                        model,
+                        aspectRatio: snapshot.aspectRatio,
+                        createdAt: startedAt,
+                    },
+                });
+                createdAssetIds.push(assetId);
+                refs.push({
+                    assetId,
+                    kind: "image",
+                    note: "Studio Cast 参考图",
+                    metadata: {
+                        source: "studio-cast",
+                        entityKind: target.kind,
+                        entityId: entity.id,
+                        prompt: snapshot.prompt,
+                        style: artDirection.name,
+                        stylePrompt: artDirection.positivePrompt,
+                        effectivePrompt: snapshot.effectivePrompt,
+                        negativePrompt: snapshot.negativePrompt,
+                        model,
+                        aspectRatio: snapshot.aspectRatio,
+                        generatedAt: startedAt,
+                    },
+                });
+            }
+            const latestEntity = getCastEntity(episode, target.kind, target.id);
+            if (!latestEntity) continue;
+            const updatedEntity = appendGeneratedImageRefs(latestEntity, refs, snapshot);
+            const updated = await input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, target.kind, updatedEntity));
+            series = updated.series;
+            episode = updated.episode;
+            results.push({ kind: target.kind, id: entity.id, name: entity.name, status: "completed", createdAssetIds, selectedAssetId: getSelectedImageRef(updatedEntity)?.assetId });
+        } catch (error) {
+            const latestEntity = getCastEntity(episode, target.kind, target.id);
+            if (!latestEntity) {
+                results.push({ kind: target.kind, id: entity.id, name: entity.name, status: "failed", createdAssetIds: [], error: readGenerationError(error) });
+                continue;
+            }
+            const failedEntity = withCastGenerationImage(latestEntity, {
+                ...snapshot,
+                status: "failed",
+                lastImageError: readGenerationError(error),
+            });
+            const updated = await input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, target.kind, failedEntity));
+            series = updated.series;
+            episode = updated.episode;
+            results.push({ kind: target.kind, id: entity.id, name: entity.name, status: "failed", createdAssetIds: [], error: readGenerationError(error) });
+        }
+    }
+
+    return { series, episode, results };
+}
+
+export async function selectCastAssetReference(input: SelectCastAssetReferenceInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const entity = getCastEntity(episode, input.kind, input.entityId);
+    if (!entity) throw new StudioGenerationError("Cast 素材不存在。");
+
+    const updatedEntity = {
+        ...entity,
+        assetRefs: selectImageAssetRef(entity.assetRefs, input.assetId),
+    };
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, updatedEntity));
+}
+
+export async function updateCastEntityPrompt(input: UpdateCastEntityPromptInput): Promise<{ series: StudioSeries; episode: StudioEpisode }> {
+    const prompt = input.prompt.trim();
+    if (!prompt) throw new StudioGenerationError("Cast prompt 不能为空。");
+    const series = await input.repository.getSeries(input.seriesId);
+    const episode = series?.episodes.find((item) => item.id === input.episodeId);
+    if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
+    const entity = getCastEntity(episode, input.kind, input.entityId);
+    if (!entity) throw new StudioGenerationError("Cast 素材不存在。");
+
+    return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, { ...entity, prompt }));
+}
+
+type StudioCastEntity = StudioCharacter | StudioScene | StudioProp;
+
+type StudioArtDirectionSnapshot = {
+    name: string;
+    positivePrompt: string;
+    negativePrompt: string;
+};
+
+type StudioCastGenerationSnapshot = {
+    status?: "completed" | "failed";
+    prompt: string;
+    style: string;
+    stylePrompt: string;
+    effectivePrompt: string;
+    negativePrompt: string;
+    model: string;
+    count: 1 | 2 | 4;
+    aspectRatio: string;
+    createdAt: string;
+    lastImageError?: string;
+};
+
+async function defaultRequestImages(config: AiConfig, prompt: string) {
+    const { requestGeneration } = await import("@/services/api/image");
+    return requestGeneration(config, prompt);
+}
+
+async function defaultStoreImage(dataUrl: string) {
+    const { uploadImage } = await import("@/services/image-storage");
+    return uploadImage(dataUrl);
+}
+
+function readStudioArtDirection(episode: StudioEpisode): StudioArtDirectionSnapshot | null {
+    const value = episode.generation?.artDirection;
+    if (!value || typeof value !== "object") return null;
+    const draft = value as { name?: unknown; positivePrompt?: unknown; negativePrompt?: unknown };
+    const positivePrompt = typeof draft.positivePrompt === "string" ? draft.positivePrompt.trim() : "";
+    if (!positivePrompt) return null;
+    return {
+        name: typeof draft.name === "string" ? draft.name : "",
+        positivePrompt,
+        negativePrompt: typeof draft.negativePrompt === "string" ? draft.negativePrompt.trim() : "",
+    };
+}
+
+function selectCastTargets(episode: StudioEpisode, target: GenerateCastTarget): Array<{ kind: StudioCastTargetKind; id: string }> {
+    if (target.mode === "ids") {
+        const ids = new Set(target.ids);
+        return castEntities(episode, target.kind)
+            .filter((entity) => ids.has(entity.id))
+            .map((entity) => ({ kind: target.kind, id: entity.id }));
+    }
+
+    const allTargets = [...episode.characters.map((entity) => ({ kind: "character" as const, entity })), ...episode.scenes.map((entity) => ({ kind: "scene" as const, entity })), ...episode.props.map((entity) => ({ kind: "prop" as const, entity }))];
+
+    return allTargets
+        .filter(({ entity }) => {
+            const status = readCastImageGenerationStatus(entity);
+            if (status === "processing") return false;
+            if (target.mode === "failedOnly") return status === "failed";
+            return !getSelectedImageRef(entity);
+        })
+        .map(({ kind, entity }) => ({ kind, id: entity.id }));
+}
+
+function castEntities(episode: StudioEpisode, kind: StudioCastTargetKind): StudioCastEntity[] {
+    if (kind === "character") return episode.characters;
+    if (kind === "scene") return episode.scenes;
+    return episode.props;
+}
+
+function getCastEntity(episode: StudioEpisode, kind: StudioCastTargetKind, id: string): StudioCastEntity | undefined {
+    return castEntities(episode, kind).find((entity) => entity.id === id);
+}
+
+function patchEpisodeCastEntity(episode: StudioEpisode, kind: StudioCastTargetKind, entity: StudioCastEntity): StudioEpisodePatch {
+    if (kind === "character") return { characters: episode.characters.map((item) => (item.id === entity.id ? (entity as StudioCharacter) : item)) };
+    if (kind === "scene") return { scenes: episode.scenes.map((item) => (item.id === entity.id ? (entity as StudioScene) : item)) };
+    return { props: episode.props.map((item) => (item.id === entity.id ? (entity as StudioProp) : item)) };
+}
+
+function buildCastGenerationSnapshot(input: { kind: StudioCastTargetKind; entity: StudioCastEntity; artDirection: StudioArtDirectionSnapshot; model: string; count: 1 | 2 | 4; createdAt: string }): StudioCastGenerationSnapshot {
+    const prompt = input.entity.prompt || normalizeCastPrompt(input.kind, input.entity);
+    const castPrompt = buildCastReferencePrompt(input.kind, prompt);
+    const effectivePrompt = `${castPrompt}\n\nStyle baseline:\n${input.artDirection.positivePrompt}`;
+    return {
+        prompt,
+        style: input.artDirection.name,
+        stylePrompt: input.artDirection.positivePrompt,
+        effectivePrompt,
+        negativePrompt: [input.artDirection.negativePrompt, castKindNegativePrompt(input.kind)].filter(Boolean).join(", "),
+        model: input.model,
+        count: input.count,
+        aspectRatio: castKindAspectRatio(input.kind),
+        createdAt: input.createdAt,
+    };
+}
+
+export function buildCastReferencePrompt(kind: StudioCastTargetKind, prompt: string) {
+    const normalizedPrompt = prompt.trim();
+    if (kind === "character") {
+        return [
+            normalizedPrompt,
+            "Composition: character reference sheet, single unified image, seamless layout without borders or frames, neutral gray background. Include a large head-and-shoulders portrait and full-body front / side / back views. Keep one consistent character identity, clothing, face, body proportions, and material details across all views. Soft studio lighting, clean readable silhouette.",
+        ].join("\n\n");
+    }
+    if (kind === "scene") {
+        return [
+            normalizedPrompt,
+            "Composition: wide establishing shot of the environment, single unified image, no foreground character blocking the view. Emphasize atmosphere, architecture, terrain structure, lighting, color palette, and usable spatial layout for future storyboard shots.",
+        ].join("\n\n");
+    }
+    return [
+        normalizedPrompt,
+        "Composition: product photography style object reference, single unified image on neutral background. Main view centered at slight angle, with clear material, silhouette, scale cues, and detail close-ups. Clean studio lighting, subtle shadow beneath object.",
+    ].join("\n\n");
+}
+
+function castKindNegativePrompt(kind: StudioCastTargetKind) {
+    if (kind === "character") return "text, labels, watermark, UI overlay, panel borders, multiple separate images, inconsistent face, inconsistent outfit, distorted anatomy";
+    if (kind === "scene") return "text, labels, watermark, UI overlay, random characters, cluttered composition, low detail";
+    return "text, labels, watermark, UI overlay, messy background, duplicated objects, distorted shape";
+}
+
+function castKindAspectRatio(kind: StudioCastTargetKind) {
+    if (kind === "character") return "9:16";
+    if (kind === "scene") return "16:9";
+    return "1:1";
+}
+
+function castKindLabel(kind: StudioCastTargetKind) {
+    if (kind === "character") return "角色";
+    if (kind === "scene") return "场景";
+    return "道具";
+}
+
+function appendGeneratedImageRefs(entity: StudioCastEntity, refs: StudioAssetRef[], snapshot: StudioCastGenerationSnapshot): StudioCastEntity {
+    const hasSelected = Boolean(getSelectedImageRef(entity));
+    const nextRefs = [...entity.assetRefs];
+    refs.forEach((ref, index) => {
+        if (nextRefs.some((item) => item.kind === "image" && item.assetId === ref.assetId)) return;
+        nextRefs.push({ ...ref, role: !hasSelected && index === 0 ? "selected" : "candidate" });
+    });
+    return withCastGenerationImage(
+        {
+            ...entity,
+            assetRefs: normalizeSingleSelectedImageRef(nextRefs),
+        },
+        { ...snapshot, status: "completed" },
+    );
+}
+
+function withCastGenerationImage(entity: StudioCastEntity, snapshot: StudioCastGenerationSnapshot): StudioCastEntity {
+    return {
+        ...entity,
+        generation: {
+            ...entity.generation,
+            image: {
+                status: snapshot.status ?? "completed",
+                lastPrompt: snapshot.prompt,
+                lastStyle: snapshot.style,
+                lastStylePrompt: snapshot.stylePrompt,
+                lastEffectivePrompt: snapshot.effectivePrompt,
+                lastNegativePrompt: snapshot.negativePrompt,
+                lastModel: snapshot.model,
+                lastCount: snapshot.count,
+                lastAspectRatio: snapshot.aspectRatio,
+                lastGeneratedAt: snapshot.createdAt,
+                ...(snapshot.lastImageError ? { lastImageError: snapshot.lastImageError } : {}),
+            },
+        },
+    };
+}
+
+function normalizeSingleSelectedImageRef(refs: StudioAssetRef[]) {
+    let selectedSeen = false;
+    return refs.map((ref) => {
+        if (ref.kind !== "image" || ref.role !== "selected") return ref;
+        if (!selectedSeen) {
+            selectedSeen = true;
+            return ref;
+        }
+        return { ...ref, role: "candidate" as const };
+    });
+}
+
+function selectImageAssetRef(refs: StudioAssetRef[], assetId: string) {
+    const deduped: StudioAssetRef[] = [];
+    for (const ref of refs) {
+        if (ref.kind === "image" && deduped.some((item) => item.kind === "image" && item.assetId === ref.assetId)) continue;
+        deduped.push(ref);
+    }
+    if (!deduped.some((ref) => ref.kind === "image" && ref.assetId === assetId)) {
+        deduped.push({ assetId, kind: "image", role: "candidate" });
+    }
+    return normalizeSingleSelectedImageRef(
+        deduped.map((ref) => {
+            if (ref.kind !== "image") return ref;
+            if (ref.assetId === assetId) return { ...ref, role: "selected" as const };
+            if (ref.role === "selected") return { ...ref, role: "candidate" as const };
+            return ref;
+        }),
+    );
+}
+
+function getSelectedImageRef(entity: Pick<StudioCastEntity, "assetRefs">) {
+    return entity.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected");
+}
+
+function readCastImageGenerationStatus(entity: StudioCastEntity) {
+    const image = entity.generation?.image;
+    if (!image || typeof image !== "object") return "";
+    const status = (image as { status?: unknown }).status;
+    return typeof status === "string" ? status : "";
+}
+
+function readGenerationError(error: unknown) {
+    return error instanceof Error ? error.message : "生成失败";
+}
+
 type StudioChatCompletionResponse = {
     choices?: Array<{ message?: { content?: string } }>;
     error?: { message?: string };
@@ -185,7 +606,8 @@ function buildScriptParseMessages(script: string): StudioChatMessage[] {
                 "你是短漫剧 Studio 的剧本解析器。",
                 "只返回 JSON，不要返回 Markdown 或解释。",
                 "JSON 字段必须是 characters、scenes、props、shotDrafts。",
-                "characters/scenes/props 每项包含 name、description。",
+                "characters/scenes/props 每项包含 name、description、prompt。",
+                "prompt 是用于生成该角色、场景或道具参考图的图像提示词初稿，不要包含全局画风。",
                 "shotDrafts 每项包含 title、description，可选 dialogue。",
                 "分镜按叙事顺序拆分，保持简洁但可直接进入分镜编辑。",
             ].join("\n"),
@@ -216,15 +638,27 @@ function extractJsonObject(value: string) {
 }
 
 function toStudioCharacter(item: z.infer<typeof parsedItemSchema>): StudioCharacter {
-    return { id: nanoid(), name: item.name, description: item.description, assetRefs: [] };
+    return { id: nanoid(), name: item.name, description: item.description, prompt: normalizeCastPrompt("character", item), assetRefs: [] };
 }
 
 function toStudioScene(item: z.infer<typeof parsedItemSchema>): StudioScene {
-    return { id: nanoid(), name: item.name, description: item.description, assetRefs: [] };
+    return { id: nanoid(), name: item.name, description: item.description, prompt: normalizeCastPrompt("scene", item), assetRefs: [] };
 }
 
 function toStudioProp(item: z.infer<typeof parsedItemSchema>): StudioProp {
-    return { id: nanoid(), name: item.name, description: item.description, assetRefs: [] };
+    return { id: nanoid(), name: item.name, description: item.description, prompt: normalizeCastPrompt("prop", item), assetRefs: [] };
+}
+
+function normalizeCastPrompt(kind: "character" | "scene" | "prop", item: z.infer<typeof parsedItemSchema>) {
+    const explicitPrompt = item.prompt?.trim();
+    if (explicitPrompt) return explicitPrompt;
+    const base = [item.name, item.description]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join("，");
+    if (kind === "character") return `${base}，角色参考设定图，清晰外貌、服装、气质和轮廓。`;
+    if (kind === "scene") return `${base}，场景参考图，清晰空间结构、时间、光线和氛围。`;
+    return `${base}，道具参考图，清晰形态、材质、尺寸感和细节。`;
 }
 
 function toStudioShot(item: z.infer<typeof parsedShotSchema>, index: number): StudioShot {

@@ -14,7 +14,9 @@ export type StudioCharacter = {
     id: string;
     name: string;
     description: string;
+    prompt: string;
     assetRefs: StudioAssetRef[];
+    generation?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
 };
 
@@ -22,7 +24,9 @@ export type StudioScene = {
     id: string;
     name: string;
     description: string;
+    prompt: string;
     assetRefs: StudioAssetRef[];
+    generation?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
 };
 
@@ -30,7 +34,9 @@ export type StudioProp = {
     id: string;
     name: string;
     description: string;
+    prompt: string;
     assetRefs: StudioAssetRef[];
+    generation?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
 };
 

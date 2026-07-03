@@ -99,7 +99,7 @@ describe("asset reference boundary", () => {
                     title: "Episode 01",
                     order: 1,
                     script: "",
-                    characters: [{ id: "char-1", name: "阿岚", description: "", assetRefs: [assetRef("asset-image")] }],
+                    characters: [{ id: "char-1", name: "阿岚", description: "", prompt: "阿岚角色参考图", assetRefs: [assetRef("asset-image")] }],
                     scenes: [],
                     props: [],
                     shots: [{ id: "shot-1", title: "开场镜头", order: 1, description: "", assetRefs: [assetRef("asset-image")] }],
@@ -132,5 +132,40 @@ describe("asset reference boundary", () => {
         });
 
         expect(references.map((reference) => reference.label)).toEqual(["山海便利店 / Episode 01 / 阿岚", "山海便利店 / Episode 01 / 开场镜头", "分镜草图 / 角色参考图"]);
+    });
+
+    it("reports selected and candidate Cast image refs as protected Studio asset references", () => {
+        const series = {
+            id: "series-1",
+            title: "山海便利店",
+            summary: "",
+            stylePrompt: "",
+            modelPreferences: {},
+            episodes: [
+                {
+                    id: "episode-1",
+                    title: "Episode 01",
+                    order: 1,
+                    script: "",
+                    characters: [
+                        { id: "char-1", name: "阿岚", description: "", prompt: "阿岚角色参考图", assetRefs: [{ assetId: "asset-selected", kind: "image" as const, role: "selected" as const }] },
+                        { id: "char-2", name: "青蛇", description: "", prompt: "青蛇角色参考图", assetRefs: [{ assetId: "asset-candidate", kind: "image" as const, role: "candidate" as const }] },
+                    ],
+                    scenes: [],
+                    props: [],
+                    shots: [],
+                    createdAt: "2026-07-01T00:00:00.000Z",
+                    updatedAt: "2026-07-01T00:00:00.000Z",
+                },
+            ],
+            sharedCharacters: [],
+            sharedScenes: [],
+            sharedProps: [],
+            createdAt: "2026-07-01T00:00:00.000Z",
+            updatedAt: "2026-07-01T00:00:00.000Z",
+        } satisfies StudioSeries;
+
+        expect(findAssetReferences("asset-selected", { studioSeries: [series], canvasProjects: [] }).map((reference) => reference.label)).toEqual(["山海便利店 / Episode 01 / 阿岚"]);
+        expect(findAssetReferences("asset-candidate", { studioSeries: [series], canvasProjects: [] }).map((reference) => reference.label)).toEqual(["山海便利店 / Episode 01 / 青蛇"]);
     });
 });

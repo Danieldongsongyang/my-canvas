@@ -2,14 +2,18 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Alert, App, Button, ConfigProvider, Input, List, Modal, Select, Tag, theme as antdTheme } from "antd";
-import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Plus, Save, Settings2, Sparkles, Users, WandSparkles } from "lucide-react";
+import { Alert, App, Button, ConfigProvider, Input, List, Modal, Select, Tag, Tooltip, theme as antdTheme } from "antd";
+import { ArrowLeft, Box, Check, ChevronRight, Clapperboard, Film, Image, Layers, Lock, MapPin, Palette, Pencil, Save, Settings2, Sparkles, Users, WandSparkles } from "lucide-react";
 
-import { normalizeScriptStructure, parseAndApplyScript, StudioGenerationError } from "@/services/api/studio-generation";
+import { generateCastReferences, normalizeScriptStructure, parseAndApplyScript, selectCastAssetReference, StudioGenerationError, updateCastEntityPrompt, type StudioCastTargetKind } from "@/services/api/studio-generation";
 import { studioRepository, type StudioEpisode, type StudioSeries } from "@/services/studio-local";
 import { useConfigStore } from "@/stores/use-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import { useAssetStore } from "@/stores/use-asset-store";
+import type { Asset } from "@/stores/use-asset-store";
+import { getAssetCoverUrl } from "@/lib/local-asset-library";
 import { cn } from "@/lib/utils";
+import { CastWorkbenchModal } from "./components/cast-workbench-modal";
 import {
     buildCastSections,
     buildStoryboardCards,
@@ -46,6 +50,8 @@ export default function StudioWorkspacePage() {
     const [savingArtDirection, setSavingArtDirection] = useState(false);
     const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
     const [savingModelSettings, setSavingModelSettings] = useState(false);
+    const [generatingCast, setGeneratingCast] = useState(false);
+    const [workbenchTarget, setWorkbenchTarget] = useState<{ kind: StudioCastTargetKind; entityId: string } | null>(null);
     const [modelDraft, setModelDraft] = useState<Record<StudioModelPreferenceKey, string>>({
         textModel: FOLLOW_GLOBAL_MODEL_VALUE,
         imageModel: FOLLOW_GLOBAL_MODEL_VALUE,
@@ -54,9 +60,12 @@ export default function StudioWorkspacePage() {
     const config = useConfigStore((state) => state.config);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const assets = useAssetStore((state) => state.assets);
+    const addAsset = useAssetStore((state) => state.addAsset);
 
     const episode = useMemo<StudioEpisode | null>(() => series?.episodes[0] ?? null, [series]);
     const textModel = series?.modelPreferences.textModel || config.textModel || config.model;
+    const imageModel = series?.modelPreferences.imageModel || config.imageModel;
     const modelSummary = useMemo(() => buildStudioModelSummary(series?.modelPreferences ?? {}, config), [series?.modelPreferences, config]);
     const steps = useMemo(() => (episode ? buildStudioPipelineSteps(episode) : []), [episode]);
 
@@ -218,6 +227,111 @@ export default function StudioWorkspacePage() {
         }
     };
 
+    const generateMissingCastReferences = async () => {
+        await runCastGeneration({ target: { mode: "allMissing" }, count: 1 });
+    };
+
+    const generateWorkbenchCastReferences = async (kind: StudioCastTargetKind, entityId: string, prompt: string, count: 1 | 2 | 4) => {
+        if (!series || !episode) return;
+        const entity = findCastEntity(episode, kind, entityId);
+        if (!entity) return;
+        const normalizedPrompt = prompt.trim();
+        if (!normalizedPrompt) {
+            message.warning("请先填写基础 prompt");
+            return;
+        }
+        if (normalizedPrompt !== entity.prompt) {
+            const updated = await updateCastEntityPrompt({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind,
+                entityId,
+                prompt: normalizedPrompt,
+            });
+            setSeries(updated.series);
+            setStructureDraft(formatEpisodeStructure(updated.episode));
+        }
+        await runCastGeneration({ target: { mode: "ids", kind, ids: [entityId] }, count });
+    };
+
+    const saveWorkbenchPrompt = async (kind: StudioCastTargetKind, entityId: string, prompt: string) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await updateCastEntityPrompt({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind,
+                entityId,
+                prompt,
+            });
+            setSeries(updated.series);
+            setStructureDraft(formatEpisodeStructure(updated.episode));
+            message.success("Prompt 已保存");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "Prompt 保存失败");
+        }
+    };
+
+    const selectWorkbenchReference = async (kind: StudioCastTargetKind, entityId: string, assetId: string) => {
+        if (!series || !episode) return;
+        try {
+            const updated = await selectCastAssetReference({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                kind,
+                entityId,
+                assetId,
+            });
+            setSeries(updated.series);
+            message.success("主参考图已更新");
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "主参考图更新失败");
+        }
+    };
+
+    const runCastGeneration = async ({ target, count }: { target: Parameters<typeof generateCastReferences>[0]["target"]; count: 1 | 2 | 4 }) => {
+        if (!series || !episode) return;
+        if (!readArtDirectionDraft(episode)) {
+            setActiveStep("art_direction");
+            message.warning("请先完成 Style 定调");
+            return;
+        }
+        if (!isAiConfigReady(config, imageModel)) {
+            openConfigDialog(true);
+            message.warning("请先配置可用的图像模型");
+            return;
+        }
+        setGeneratingCast(true);
+        try {
+            const result = await generateCastReferences({
+                repository: studioRepository,
+                seriesId: series.id,
+                episodeId: episode.id,
+                config: { ...config, model: imageModel, imageModel },
+                target,
+                count,
+                addAsset,
+            });
+            setSeries(result.series);
+            const completed = result.results.filter((item) => item.status === "completed").length;
+            const failed = result.results.filter((item) => item.status === "failed").length;
+            if (!result.results.length) {
+                message.info("没有缺失的 Cast 参考图");
+            } else if (failed) {
+                message.warning(`已生成 ${completed} 个参考图，${failed} 个失败`);
+            } else {
+                message.success(`已生成 ${completed} 个参考图`);
+            }
+        } catch (error) {
+            message.error(error instanceof StudioGenerationError ? error.message : "Cast 参考图生成失败");
+        } finally {
+            setGeneratingCast(false);
+        }
+    };
+
     if (!hydrated) {
         return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500 dark:text-stone-400">正在加载 Studio 工作台...</main>;
     }
@@ -270,7 +384,15 @@ export default function StudioWorkspacePage() {
                             onSave={saveArtDirection}
                         />
                     ) : activeStep === "cast" ? (
-                        <CastStep episode={episode} />
+                        <CastStep
+                            episode={episode}
+                            assets={assets}
+                            generating={generatingCast}
+                            styleReady={Boolean(readArtDirectionDraft(episode))}
+                            imageModelReady={isAiConfigReady(config, imageModel)}
+                            onGenerateMissing={() => void generateMissingCastReferences()}
+                            onOpenWorkbench={(kind, entityId) => setWorkbenchTarget({ kind, entityId })}
+                        />
                     ) : activeStep === "storyboard_r2v" ? (
                         <StoryboardStep episode={episode} onJumpToScript={() => setActiveStep("script")} />
                     ) : (
@@ -289,6 +411,19 @@ export default function StudioWorkspacePage() {
                     }}
                     onCancel={() => setModelSettingsOpen(false)}
                     onSave={saveModelSettings}
+                />
+                <CastWorkbenchModal
+                    open={Boolean(workbenchTarget)}
+                    kind={workbenchTarget?.kind ?? null}
+                    entityId={workbenchTarget?.entityId ?? null}
+                    episode={episode}
+                    assets={assets}
+                    generating={generatingCast}
+                    imageModelReady={isAiConfigReady(config, imageModel)}
+                    onGenerate={(kind, entityId, prompt, count) => void generateWorkbenchCastReferences(kind, entityId, prompt, count)}
+                    onSavePrompt={(kind, entityId, prompt) => void saveWorkbenchPrompt(kind, entityId, prompt)}
+                    onSelectReference={(kind, entityId, assetId) => void selectWorkbenchReference(kind, entityId, assetId)}
+                    onClose={() => setWorkbenchTarget(null)}
                 />
             </main>
         </ConfigProvider>
@@ -765,12 +900,31 @@ function StylePresetCard({ preset, selected, tone, onSelect }: { preset: StudioS
     );
 }
 
-function CastStep({ episode }: { episode: StudioEpisode }) {
+function CastStep({
+    episode,
+    assets,
+    generating,
+    styleReady,
+    imageModelReady,
+    onGenerateMissing,
+    onOpenWorkbench,
+}: {
+    episode: StudioEpisode;
+    assets: Asset[];
+    generating: boolean;
+    styleReady: boolean;
+    imageModelReady: boolean;
+    onGenerateMissing: () => void;
+    onOpenWorkbench: (kind: StudioCastTargetKind, entityId: string) => void;
+}) {
     const sections = buildCastSections(episode);
     const total = sections.reduce((sum, section) => sum + section.items.length, 0);
     const readyCount = sections.reduce((sum, section) => sum + section.items.filter((item) => item.status === "ready").length, 0);
+    const missingCount = sections.reduce((sum, section) => sum + section.items.filter((item) => !item.selectedAssetId && item.status !== "generating").length, 0);
     const [activeKind, setActiveKind] = useState<"all" | "character" | "scene" | "prop">("all");
     const visibleSections = activeKind === "all" ? sections : sections.filter((section) => section.kind === activeKind);
+    const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+    const generateDisabledReason = !styleReady ? "先完成 Style 定调" : !imageModelReady ? "请先配置可用的图像模型" : !missingCount ? "参考图已生成" : "";
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden">
@@ -786,9 +940,13 @@ function CastStep({ episode }: { episode: StudioEpisode }) {
                     </>
                 }
                 trailing={
-                    <Button className={studioSecondaryButtonClass} icon={<Plus className="size-4" />} disabled>
-                        新增素材
-                    </Button>
+                    <Tooltip title={generateDisabledReason}>
+                        <span>
+                            <Button className={studioPrimaryButtonClass} type="primary" icon={<WandSparkles className="size-4" />} loading={generating} disabled={Boolean(generateDisabledReason) || generating} onClick={onGenerateMissing}>
+                                生成缺失参考图
+                            </Button>
+                        </span>
+                    </Tooltip>
                 }
             />
             <div className="border-b border-[rgba(255,255,255,0.06)] bg-[#131116] px-6 pt-3">
@@ -820,7 +978,7 @@ function CastStep({ episode }: { episode: StudioEpisode }) {
                                 <h3 className="mb-4 text-lg font-semibold text-[#f2ede4]">{section.title}</h3>
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                                     {section.items.map((item) => (
-                                        <CastAssetCard key={item.id} item={item} />
+                                        <CastAssetCard key={item.id} item={item} asset={item.selectedAssetId ? assetMap.get(item.selectedAssetId) : undefined} onOpen={() => onOpenWorkbench(item.kind, item.id)} />
                                     ))}
                                 </div>
                             </section>
@@ -832,22 +990,52 @@ function CastStep({ episode }: { episode: StudioEpisode }) {
     );
 }
 
-function CastAssetCard({ item }: { item: ReturnType<typeof buildCastSections>[number]["items"][number] }) {
+function CastAssetCard({ item, asset, onOpen }: { item: ReturnType<typeof buildCastSections>[number]["items"][number]; asset?: Asset; onOpen: () => void }) {
+    const selectedImage = asset ? getAssetCoverUrl(asset) : "";
+    const statusTone = castStatusTone(item.status);
     return (
-        <article className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4">
-            <div className="mb-4 flex aspect-[16/9] items-center justify-center rounded-md border border-dashed border-[rgba(255,255,255,0.10)] bg-black/20 text-[#8b8597]">
-                <Image className="size-7" />
+        <article
+            className="group cursor-pointer rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.045)] p-4 transition hover:border-[#34d8c4]/35 hover:bg-[#34d8c4]/[0.07]"
+            role="button"
+            tabIndex={0}
+            onClick={onOpen}
+            onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") onOpen();
+            }}
+        >
+            <div className="mb-4 flex aspect-[16/9] items-center justify-center overflow-hidden rounded-md border border-dashed border-[rgba(255,255,255,0.10)] bg-black/20 text-[#8b8597]">
+                {selectedImage ? <img src={selectedImage} alt={item.name} className="h-full w-full object-cover" /> : <Image className="size-7" />}
             </div>
             <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                     <h4 className="truncate text-base font-semibold text-[#f2ede4]">{item.name}</h4>
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#8b8597]">{item.description || "暂无描述"}</p>
                 </div>
-                <Tag color={item.status === "ready" ? "success" : "warning"}>{item.status === "ready" ? "ready" : "pending"}</Tag>
+                <Tag color={statusTone.color}>{statusTone.label}</Tag>
             </div>
-            <p className="mt-3 text-xs text-[#8b8597]">出现次数：{item.appearances}</p>
+            <div className="mt-3 rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0a090c]/70 p-3">
+                <p className="font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Prompt</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#a8a2b0]">{item.prompt}</p>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#8b8597]">
+                <span className="rounded-full border border-[rgba(255,255,255,0.06)] bg-[#0a090c] px-2.5 py-1">候选 {item.candidateCount}</span>
+                <span className="rounded-full border border-[rgba(255,255,255,0.06)] bg-[#0a090c] px-2.5 py-1">出现 {item.appearances}</span>
+            </div>
+            {item.lastError ? <p className="mt-2 line-clamp-2 text-xs leading-5 text-[#ffa94d]">最近失败：{item.lastError}</p> : null}
         </article>
     );
+}
+
+function castStatusTone(status: ReturnType<typeof buildCastSections>[number]["items"][number]["status"]) {
+    if (status === "ready") return { label: "ready", color: "success" };
+    if (status === "generating") return { label: "generating", color: "processing" };
+    if (status === "failed") return { label: "failed", color: "error" };
+    return { label: "pending", color: "warning" };
+}
+
+function findCastEntity(episode: StudioEpisode, kind: StudioCastTargetKind, entityId: string) {
+    const pool = kind === "character" ? episode.characters : kind === "scene" ? episode.scenes : episode.props;
+    return pool.find((entity) => entity.id === entityId);
 }
 
 function StoryboardStep({ episode, onJumpToScript }: { episode: StudioEpisode; onJumpToScript: () => void }) {

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { BookOpen, Clapperboard, Film, Palette, Users } from "lucide-react";
 
-import type { StudioEpisode, StudioSeries } from "@/services/studio-local";
+import type { StudioAssetRef, StudioEpisode, StudioSeries } from "@/services/studio-local";
 import type { AiConfig } from "@/stores/use-config-store";
 
 export type StudioPipelineStep = {
@@ -35,9 +35,13 @@ export type StudioCastItem = {
     id: string;
     name: string;
     description: string;
+    prompt: string;
     kind: "character" | "scene" | "prop";
     appearances: number;
-    status: "ready" | "pending";
+    status: "ready" | "pending" | "generating" | "failed";
+    selectedAssetId?: string;
+    candidateCount: number;
+    lastError?: string;
 };
 
 export type StudioCastSection = {
@@ -179,9 +183,9 @@ export function buildStudioPipelineSteps(episode: StudioEpisode): StudioPipeline
 export function formatEpisodeStructure(episode: StudioEpisode | null) {
     return JSON.stringify(
         {
-            characters: episode?.characters.map(({ name, description }) => ({ name, description })) ?? [],
-            scenes: episode?.scenes.map(({ name, description }) => ({ name, description })) ?? [],
-            props: episode?.props.map(({ name, description }) => ({ name, description })) ?? [],
+            characters: episode?.characters.map(({ name, description, prompt }) => ({ name, description, prompt: prompt || buildCastPromptFallback("character", name, description) })) ?? [],
+            scenes: episode?.scenes.map(({ name, description, prompt }) => ({ name, description, prompt: prompt || buildCastPromptFallback("scene", name, description) })) ?? [],
+            props: episode?.props.map(({ name, description, prompt }) => ({ name, description, prompt: prompt || buildCastPromptFallback("prop", name, description) })) ?? [],
             shotDrafts: episode?.shots.map(({ title, description, dialogue }) => ({ title, description, ...(dialogue ? { dialogue } : {}) })) ?? [],
         },
         null,
@@ -268,18 +272,25 @@ function buildStudioModelSummaryItem(key: StudioModelPreferenceKey, preference: 
     return { key, label: STUDIO_MODEL_LABELS[key], value: fallback || "未配置", source: fallback ? "global" : "missing" };
 }
 
-function buildCastItem(item: { id: string; name: string; description: string; assetRefs: unknown[] }, kind: StudioCastItem["kind"], episode: StudioEpisode): StudioCastItem {
+function buildCastItem(item: { id: string; name: string; description: string; prompt?: string; assetRefs: StudioAssetRef[]; generation?: Record<string, unknown> }, kind: StudioCastItem["kind"], episode: StudioEpisode): StudioCastItem {
     const appearances = episode.shots.reduce((count, shot) => {
         const haystack = `${shot.title}\n${shot.description}\n${shot.dialogue ?? ""}`;
         return count + countTextMentions(haystack, item.name);
     }, 0);
+    const selectedRef = item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected");
+    const candidateCount = item.assetRefs.filter((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate")).length;
+    const imageGeneration = readCastImageGeneration(item.generation);
     return {
         id: item.id,
         name: item.name,
         description: item.description,
+        prompt: item.prompt || buildCastPromptFallback(kind, item.name, item.description),
         kind,
         appearances,
-        status: item.assetRefs.length > 0 ? "ready" : "pending",
+        status: readCastStatus(Boolean(selectedRef), imageGeneration),
+        selectedAssetId: selectedRef?.assetId,
+        candidateCount,
+        lastError: imageGeneration.lastImageError,
     };
 }
 
@@ -287,4 +298,31 @@ function countTextMentions(text: string, term: string) {
     const normalized = term.trim();
     if (!normalized) return 0;
     return text.split(normalized).length - 1;
+}
+
+function readCastImageGeneration(generation: Record<string, unknown> | undefined): { status?: string; lastImageError?: string } {
+    const image = generation?.image;
+    if (!image || typeof image !== "object") return {};
+    const draft = image as { status?: unknown; lastImageError?: unknown };
+    return {
+        status: typeof draft.status === "string" ? draft.status : undefined,
+        lastImageError: typeof draft.lastImageError === "string" ? draft.lastImageError : undefined,
+    };
+}
+
+function readCastStatus(hasSelectedImage: boolean, imageGeneration: { status?: string }): StudioCastItem["status"] {
+    if (imageGeneration.status === "processing") return "generating";
+    if (hasSelectedImage) return "ready";
+    if (imageGeneration.status === "failed") return "failed";
+    return "pending";
+}
+
+function buildCastPromptFallback(kind: StudioCastItem["kind"], name: string, description: string) {
+    const base = [name, description]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join("，");
+    if (kind === "character") return `${base}，角色参考设定图，清晰外貌、服装、气质和轮廓。`;
+    if (kind === "scene") return `${base}，场景参考图，清晰空间结构、时间、光线和氛围。`;
+    return `${base}，道具参考图，清晰形态、材质、尺寸感和细节。`;
 }

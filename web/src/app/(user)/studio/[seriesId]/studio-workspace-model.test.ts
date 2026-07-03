@@ -70,8 +70,8 @@ describe("studio workspace model", () => {
     it("marks rail steps from current episode content without inventing completion", () => {
         const steps = buildStudioPipelineSteps(
             episode({
-                characters: [{ id: "c1", name: "阿岚", description: "夜班店员", assetRefs: [] }],
-                scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", assetRefs: [] }],
+                characters: [{ id: "c1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] }],
+                scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店", assetRefs: [] }],
                 shots: [{ id: "shot-1", title: "开场", order: 1, description: "便利店亮灯", assetRefs: [] }],
                 generation: {
                     scriptParser: { status: "completed" },
@@ -93,18 +93,18 @@ describe("studio workspace model", () => {
         expect(
             formatEpisodeStructure(
                 episode({
-                    characters: [{ id: "c1", name: "阿岚", description: "夜班店员", assetRefs: [] }],
-                    scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", assetRefs: [] }],
-                    props: [{ id: "p1", name: "贝壳", description: "发光", assetRefs: [] }],
+                    characters: [{ id: "c1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] }],
+                    scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店", assetRefs: [] }],
+                    props: [{ id: "p1", name: "贝壳", description: "发光", prompt: "发光贝壳道具", assetRefs: [] }],
                     shots: [{ id: "shot-1", title: "开场", order: 1, description: "便利店亮灯", dialogue: "又是这个点。", assetRefs: [] }],
                 }),
             ),
         ).toBe(
             JSON.stringify(
                 {
-                    characters: [{ name: "阿岚", description: "夜班店员" }],
-                    scenes: [{ name: "便利店", description: "雨夜街角" }],
-                    props: [{ name: "贝壳", description: "发光" }],
+                    characters: [{ name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图" }],
+                    scenes: [{ name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店" }],
+                    props: [{ name: "贝壳", description: "发光", prompt: "发光贝壳道具" }],
                     shotDrafts: [{ title: "开场", description: "便利店亮灯", dialogue: "又是这个点。" }],
                 },
                 null,
@@ -135,11 +135,11 @@ describe("studio workspace model", () => {
         const sections = buildCastSections(
             episode({
                 characters: [
-                    { id: "c1", name: "阿岚", description: "夜班店员", assetRefs: [] },
-                    { id: "c2", name: "青蛇", description: "神秘访客", assetRefs: [] },
+                    { id: "c1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] },
+                    { id: "c2", name: "青蛇", description: "神秘访客", prompt: "青蛇角色参考图", assetRefs: [] },
                 ],
-                scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", assetRefs: [] }],
-                props: [{ id: "p1", name: "贝壳", description: "会发光", assetRefs: [] }],
+                scenes: [{ id: "s1", name: "便利店", description: "雨夜街角", prompt: "雨夜街角便利店", assetRefs: [] }],
+                props: [{ id: "p1", name: "贝壳", description: "会发光", prompt: "发光贝壳道具", assetRefs: [] }],
                 shots: [
                     { id: "shot-1", title: "阿岚开门", order: 1, description: "便利店门铃响起，阿岚看见贝壳", assetRefs: [] },
                     { id: "shot-2", title: "青蛇登场", order: 2, description: "青蛇走进便利店", assetRefs: [] },
@@ -154,6 +154,63 @@ describe("studio workspace model", () => {
         ]);
         expect(sections[1].items[0]).toMatchObject({ name: "便利店", appearances: 2 });
         expect(sections[2].items[0]).toMatchObject({ name: "贝壳", appearances: 1 });
+    });
+
+    it("derives Cast selected image, variants and status from image assetRefs", () => {
+        const sections = buildCastSections(
+            episode({
+                characters: [
+                    {
+                        id: "ready",
+                        name: "阿岚",
+                        description: "夜班店员",
+                        prompt: "阿岚角色参考图",
+                        assetRefs: [
+                            { assetId: "asset-selected", kind: "image", role: "selected" },
+                            { assetId: "asset-candidate", kind: "image", role: "candidate" },
+                        ],
+                    },
+                    {
+                        id: "candidate-only",
+                        name: "青蛇",
+                        description: "神秘访客",
+                        prompt: "青蛇角色参考图",
+                        assetRefs: [{ assetId: "asset-candidate-only", kind: "image", role: "candidate" }],
+                    },
+                    {
+                        id: "text-selected",
+                        name: "老板",
+                        description: "只绑定了文本设定",
+                        prompt: "老板角色参考图",
+                        assetRefs: [{ assetId: "asset-text", kind: "text", role: "selected" }],
+                    },
+                    {
+                        id: "failed",
+                        name: "客人",
+                        description: "生成失败",
+                        prompt: "客人角色参考图",
+                        assetRefs: [],
+                        generation: { image: { status: "failed", lastImageError: "模型拒绝生成" } },
+                    },
+                    {
+                        id: "generating",
+                        name: "巡夜人",
+                        description: "正在生成",
+                        prompt: "巡夜人角色参考图",
+                        assetRefs: [],
+                        generation: { image: { status: "processing" } },
+                    },
+                ],
+            }),
+        );
+
+        expect(sections[0].items).toMatchObject([
+            { id: "ready", status: "ready", selectedAssetId: "asset-selected", candidateCount: 2, lastError: undefined },
+            { id: "candidate-only", status: "pending", selectedAssetId: undefined, candidateCount: 1 },
+            { id: "text-selected", status: "pending", selectedAssetId: undefined, candidateCount: 0 },
+            { id: "failed", status: "failed", lastError: "模型拒绝生成" },
+            { id: "generating", status: "generating" },
+        ]);
     });
 
     it("builds lightweight StoryboardR2V cards from ordered episode shots", () => {
