@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GET, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 
 const APP_URL = "http://localhost:3002";
 const BACKEND_API_URL = "http://127.0.0.1:9000";
@@ -76,6 +76,26 @@ describe("api proxy route", () => {
         const assetsResponse = await GET(createRequest(`${APP_URL}/api/assets`), createContext(["assets"]));
 
         await expectUnsupportedApiResponse(promptsResponse);
+        await expectUnsupportedApiResponse(assetsResponse);
+    });
+
+    it("rejects unsupported legacy endpoints even when called through mutating methods", async () => {
+        const settingsResponse = await POST(
+            createRequest(`${APP_URL}/api/settings`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: "{}",
+            }),
+            createContext(["settings"]),
+        );
+        const assetsResponse = await DELETE(
+            createRequest(`${APP_URL}/api/assets/asset-1`, {
+                method: "DELETE",
+            }),
+            createContext(["assets", "asset-1"]),
+        );
+
+        await expectUnsupportedApiResponse(settingsResponse);
         await expectUnsupportedApiResponse(assetsResponse);
     });
 
