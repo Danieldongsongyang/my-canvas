@@ -23,6 +23,7 @@ import {
     type StudioCastTargetKind,
 } from "@/services/api/studio-generation";
 import { studioRepository, type StudioEpisode, type StudioSeries, type StudioShotReferences } from "@/services/studio-local";
+import { readNormalizedShotReferences, resolveStudioShotReferences } from "@/services/studio-shot-reference-resolver";
 import { useConfigStore } from "@/stores/use-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -1309,7 +1310,7 @@ function StoryboardStep({
     onJumpToScript: () => void;
     onOpenWorkbench: (shotId: string) => void;
 }) {
-    const cards = buildStoryboardCards(episode);
+    const cards = buildStoryboardCards(episode, assets);
     const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
     const canGenerate = episode.script.trim().length >= 40 && episode.characters.length > 0;
     const readyCount = cards.filter((card) => card.status === "ready").length;
@@ -1464,15 +1465,16 @@ function ShotWorkbenchModal({
     useEffect(() => {
         if (!open || !shot) return;
         setPrompt(shot.prompt || buildShotPromptFallback(shot));
-        setReferences(readShotReferences(shot));
+        setReferences(readNormalizedShotReferences(shot));
         setCount(1);
         setAllowNoReferences(false);
     }, [open, shot]);
 
     if (!shotId || !shot) return null;
 
-    const readyReferences = collectReadyShotReferenceAssets(episode, references, assetMap);
-    const explicitReferenceCount = references.characterIds.length + references.sceneIds.length + references.propIds.length;
+    const referenceResolution = resolveStudioShotReferences({ episode, shot, assets, references });
+    const readyReferences = referenceResolution.ready;
+    const explicitReferenceCount = referenceResolution.referenceCount;
     const imageRefs = shot.assetRefs.filter((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate"));
     const selectedImageRef = imageRefs.find((ref) => ref.role === "selected");
     const selectedImageAsset = selectedImageRef ? assetMap.get(selectedImageRef.assetId) : undefined;
@@ -1521,10 +1523,10 @@ function ShotWorkbenchModal({
                             <p className="mb-2 font-mono text-[0.59375rem] uppercase tracking-[0.16em] text-[#8b8597]">Cast selected refs</p>
                             {readyReferences.length ? (
                                 <div className="grid grid-cols-2 gap-2">
-                                    {readyReferences.map(({ id, label, asset }) => (
+                                    {readyReferences.map(({ id, label, referenceImage }) => (
                                         <div key={`${label}-${id}`} className="overflow-hidden rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0a090c]/75">
                                             <div className="flex aspect-[4/3] items-center justify-center bg-black/25 text-[#8b8597]">
-                                                <img src={getAssetCoverUrl(asset)} alt={label} className="h-full w-full object-cover" />
+                                                <img src={referenceImage.dataUrl} alt={label} className="h-full w-full object-cover" />
                                             </div>
                                             <p className="truncate px-2 py-1.5 text-xs text-[#a8a2b0]">{label}</p>
                                         </div>
@@ -1671,14 +1673,6 @@ function ReferenceSelect({ label, value, options, onChange }: { label: string; v
     );
 }
 
-function readShotReferences(shot: StudioEpisode["shots"][number]): StudioShotReferences {
-    return {
-        characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
-        sceneIds: Array.isArray(shot.metadata?.references?.sceneIds) ? shot.metadata.references.sceneIds : [],
-        propIds: Array.isArray(shot.metadata?.references?.propIds) ? shot.metadata.references.propIds : [],
-    };
-}
-
 function buildShotPromptFallback(shot: Pick<StudioEpisode["shots"][number], "description" | "dialogue">) {
     return [shot.description.trim(), shot.dialogue?.trim() ? `对白：${shot.dialogue.trim()}` : ""].filter(Boolean).join("\n");
 }
@@ -1713,18 +1707,6 @@ function formatGenerationSummary(metadata: Record<string, unknown> | undefined) 
         typeof metadata.generatedAt === "string" ? `Generated: ${metadata.generatedAt}` : typeof metadata.createdAt === "string" ? `Created: ${metadata.createdAt}` : "",
     ].filter(Boolean);
     return lines.length ? lines : ["无生成参数摘要"];
-}
-
-function collectReadyShotReferenceAssets(episode: StudioEpisode, references: StudioShotReferences, assetMap: Map<string, Asset>) {
-    const entities = [
-        ...episode.characters.filter((item) => references.characterIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name, ref: item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected") })),
-        ...episode.scenes.filter((item) => references.sceneIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name, ref: item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected") })),
-        ...episode.props.filter((item) => references.propIds.includes(item.id)).map((item) => ({ id: item.id, label: item.name, ref: item.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected") })),
-    ];
-    return entities.flatMap((item) => {
-        const asset = item.ref ? assetMap.get(item.ref.assetId) : undefined;
-        return asset && asset.kind === "image" ? [{ id: item.id, label: item.label, asset }] : [];
-    });
 }
 
 function PreflightRow({ passed, title, hint }: { passed: boolean; title: string; hint: string }) {
