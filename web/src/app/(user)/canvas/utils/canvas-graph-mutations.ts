@@ -27,10 +27,12 @@ export type CanvasUploadedMediaReplacePayload = CanvasUploadedMediaPayload & {
     nodeId: string;
 };
 
+export type CanvasUploadedMediaUpload = CanvasUploadedMediaCreatePayload | CanvasUploadedMediaReplacePayload;
+
 export type CanvasUploadedMediaMutationInput = {
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
-    upload: CanvasUploadedMediaCreatePayload | CanvasUploadedMediaReplacePayload;
+    upload: CanvasUploadedMediaUpload;
     uiState?: CanvasUploadUiState;
 };
 
@@ -49,7 +51,7 @@ export function applyUploadedMediaToCanvasGraph({ nodes, connections, upload, ui
                 nodes,
                 connections,
                 nodeId: null,
-                uiState: uiState || emptyUploadUiState(),
+                uiState: uiState ?? emptyUploadUiState(),
             };
         }
 
@@ -104,30 +106,38 @@ function replaceNodeWithUploadedMedia(node: CanvasNodeData, upload: CanvasUpload
     };
 }
 
+const UPLOADED_MEDIA_METADATA_KEYS_TO_CLEAR: Array<keyof CanvasNodeMetadata> = ["errorDetails"];
+
+const UPLOADED_IMAGE_METADATA_KEYS_TO_CLEAR: Array<keyof CanvasNodeMetadata> = [
+    "errorDetails",
+    "isBatchRoot",
+    "batchRootId",
+    "batchChildIds",
+    "batchUsesReferenceImages",
+    "generationType",
+    "model",
+    "size",
+    "quality",
+    "count",
+    "references",
+    "primaryImageId",
+    "imageBatchExpanded",
+];
+
 function cleanUploadedMediaMetadata(current: CanvasNodeMetadata | undefined, uploaded: CanvasNodeMetadata, type: CanvasUploadedMediaNodeType): CanvasNodeMetadata {
     if (type !== CanvasNodeType.Image) {
-        const { errorDetails: _errorDetails, ...rest } = current || {};
-        return { ...rest, ...uploaded };
+        return { ...withoutCanvasMetadataKeys(current, UPLOADED_MEDIA_METADATA_KEYS_TO_CLEAR), ...uploaded };
     }
 
-    const {
-        errorDetails: _errorDetails,
-        isBatchRoot: _isBatchRoot,
-        batchRootId: _batchRootId,
-        batchChildIds: _batchChildIds,
-        batchUsesReferenceImages: _batchUsesReferenceImages,
-        generationType: _generationType,
-        model: _model,
-        size: _size,
-        quality: _quality,
-        count: _count,
-        references: _references,
-        primaryImageId: _primaryImageId,
-        imageBatchExpanded: _imageBatchExpanded,
-        ...rest
-    } = current || {};
+    return { ...withoutCanvasMetadataKeys(current, UPLOADED_IMAGE_METADATA_KEYS_TO_CLEAR), ...uploaded, freeResize: false };
+}
 
-    return { ...rest, ...uploaded, freeResize: false };
+function withoutCanvasMetadataKeys(metadata: CanvasNodeMetadata | undefined, keys: Array<keyof CanvasNodeMetadata>): CanvasNodeMetadata {
+    const nextMetadata = { ...(metadata || {}) };
+    keys.forEach((key) => {
+        delete nextMetadata[key];
+    });
+    return nextMetadata;
 }
 
 function selectedUploadUiState(nodeId: string, type: CanvasUploadedMediaNodeType): CanvasUploadUiState {
