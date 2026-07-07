@@ -43,11 +43,7 @@ export type CanvasUploadedMediaMutationResult = {
     uiState: CanvasUploadUiState;
 };
 
-export type CanvasGenerationUiState = {
-    selectedNodeIds: Set<string>;
-    selectedConnectionId: string | null;
-    dialogNodeId: string | null;
-};
+export type CanvasGenerationUiState = CanvasUploadUiState;
 
 export type CanvasImageGenerationStartInput = {
     nodes: CanvasNodeData[];
@@ -76,7 +72,7 @@ export type CanvasImageGenerationSuccessInput = {
 
 export function applyCanvasImageGenerationStart({ nodes, connections, sourceNodeId, sourcePatch, generatedNodes, generatedConnections, dialogNodeId }: CanvasImageGenerationStartInput): CanvasImageGenerationStartResult {
     return {
-        nodes: [...nodes.map((node) => (node.id === sourceNodeId ? { ...node, ...sourcePatch, metadata: { ...node.metadata, ...sourcePatch.metadata } } : node)), ...generatedNodes],
+        nodes: [...nodes.map((node) => (node.id === sourceNodeId ? patchCanvasNode(node, sourcePatch) : node)), ...generatedNodes],
         connections: [...connections, ...generatedConnections],
         uiState: {
             selectedNodeIds: new Set([sourceNodeId]),
@@ -87,20 +83,14 @@ export function applyCanvasImageGenerationStart({ nodes, connections, sourceNode
 }
 
 export function applyCanvasImageGenerationSuccess({ nodes, rootNodeId, targetNodeId, width, height, metadata }: CanvasImageGenerationSuccessInput): CanvasNodeData[] {
-    const root = nodes.find((node) => node.id === rootNodeId);
+    const rootNode = nodes.find((node) => node.id === rootNodeId);
 
     return nodes.map((node) => {
         if (node.id !== targetNodeId && node.id !== rootNodeId) return node;
 
-        const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
-        const resizedNode = {
-            ...node,
-            position: { x: center.x - width / 2, y: center.y - height / 2 },
-            width,
-            height,
-        };
+        const resizedNode = resizeCanvasNodeAroundCenter(node, width, height);
 
-        if (node.id === rootNodeId && (targetNodeId === rootNodeId || !root?.metadata?.primaryImageId)) {
+        if (shouldApplyPrimaryImageToRoot(node, rootNode, rootNodeId, targetNodeId)) {
             return {
                 ...resizedNode,
                 metadata: { ...node.metadata, ...metadata, primaryImageId: targetNodeId },
@@ -119,12 +109,43 @@ export function applyCanvasImageGenerationSuccess({ nodes, rootNodeId, targetNod
 }
 
 export function applyCanvasImageGenerationError(nodes: CanvasNodeData[], nodeId: string, errorDetails: string): CanvasNodeData[] {
-    return nodes.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails } } : node));
+    return nodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        return { ...node, metadata: { ...node.metadata, status: "error", errorDetails } };
+    });
 }
 
 export function completeCanvasImageGeneration(nodes: CanvasNodeData[], rootNodeId: string, hasSuccess: boolean): CanvasNodeData[] {
     if (hasSuccess) return nodes;
-    return nodes.map((node) => (node.id === rootNodeId ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails: "全部图片生成失败" } } : node));
+    return nodes.map((node) => {
+        if (node.id !== rootNodeId) return node;
+        return { ...node, metadata: { ...node.metadata, status: "error", errorDetails: "全部图片生成失败" } };
+    });
+}
+
+function patchCanvasNode(node: CanvasNodeData, patch: Partial<CanvasNodeData>): CanvasNodeData {
+    return { ...node, ...patch, metadata: { ...node.metadata, ...patch.metadata } };
+}
+
+function resizeCanvasNodeAroundCenter(node: CanvasNodeData, width: number, height: number): CanvasNodeData {
+    const center = {
+        x: node.position.x + node.width / 2,
+        y: node.position.y + node.height / 2,
+    };
+
+    return {
+        ...node,
+        position: {
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+        },
+        width,
+        height,
+    };
+}
+
+function shouldApplyPrimaryImageToRoot(node: CanvasNodeData, rootNode: CanvasNodeData | undefined, rootNodeId: string, targetNodeId: string) {
+    return node.id === rootNodeId && (targetNodeId === rootNodeId || !rootNode?.metadata?.primaryImageId);
 }
 
 export function applyUploadedMediaToCanvasGraph({ nodes, connections, upload, uiState }: CanvasUploadedMediaMutationInput): CanvasUploadedMediaMutationResult {

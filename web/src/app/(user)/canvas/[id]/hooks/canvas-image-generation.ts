@@ -7,7 +7,7 @@ import type { ReferenceImage } from "@/types/image";
 
 import { NODE_DEFAULT_SIZE } from "../../constants";
 import { fitNodeSize } from "../../utils/canvas-node-size";
-import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "../../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "../../types";
 import { NODE_STATUS_ERROR, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS, buildImageGenerationMetadata, imageMetadata } from "../canvas-page-utils";
 import type { CanvasGenerateBranchParams, CanvasGenerationMessage, CanvasGenerationSetters } from "./canvas-generation-types";
 import { generateCanvasTextToImage, retryCanvasGeneratedImage } from "../../services/canvas-generation-orchestration";
@@ -15,7 +15,7 @@ import { generateCanvasTextToImage, retryCanvasGeneratedImage } from "../../serv
 type ImageGenerationDeps = Pick<CanvasGenerationSetters, "setNodes" | "setConnections" | "setSelectedNodeIds" | "setSelectedConnectionId" | "setDialogNodeId"> & {
     message: CanvasGenerationMessage;
     nodes: CanvasNodeData[];
-    connections: Array<{ id: string; fromNodeId: string; toNodeId: string }>;
+    connections: CanvasConnection[];
 };
 
 export async function generateCanvasImage(params: CanvasGenerateBranchParams, deps: ImageGenerationDeps) {
@@ -60,7 +60,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
         return;
     }
 
-    const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
+    const parentConfig = NODE_DEFAULT_SIZE[parentNodeTypeForImageGeneration(isConfigNode, isImageNode)];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
     const gap = 96;
@@ -104,37 +104,43 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
     const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
 
     setNodes((prev) => [
-        ...prev.map((node) =>
-            node.id === nodeId
-                ? isConfigNode
-                    ? {
-                          ...node,
-                          metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
-                      }
-                    : isEmptyImageNode
-                      ? {
-                            ...node,
-                            position: rootNode.position,
-                            width: rootNode.width,
-                            height: rootNode.height,
-                            title: rootNode.title,
-                            metadata: { ...node.metadata, ...rootNode.metadata, errorDetails: undefined },
-                        }
-                      : isImageNode
-                        ? {
-                              ...node,
-                              metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined },
-                          }
-                        : {
-                              ...node,
-                              type: CanvasNodeType.Text,
-                              title: prompt.slice(0, 32) || "Prompt",
-                              width: parentConfig.width,
-                              height: parentConfig.height,
-                              metadata: { ...node.metadata, content: prompt, prompt, status: NODE_STATUS_SUCCESS, fontSize: 14, errorDetails: undefined },
-                          }
-                : node,
-        ),
+        ...prev.map((node) => {
+            if (node.id !== nodeId) return node;
+
+            if (isConfigNode) {
+                return {
+                    ...node,
+                    metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
+                };
+            }
+
+            if (isEmptyImageNode) {
+                return {
+                    ...node,
+                    position: rootNode.position,
+                    width: rootNode.width,
+                    height: rootNode.height,
+                    title: rootNode.title,
+                    metadata: { ...node.metadata, ...rootNode.metadata, errorDetails: undefined },
+                };
+            }
+
+            if (isImageNode) {
+                return {
+                    ...node,
+                    metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined },
+                };
+            }
+
+            return {
+                ...node,
+                type: CanvasNodeType.Text,
+                title: prompt.slice(0, 32) || "Prompt",
+                width: parentConfig.width,
+                height: parentConfig.height,
+                metadata: { ...node.metadata, content: prompt, prompt, status: NODE_STATUS_SUCCESS, fontSize: 14, errorDetails: undefined },
+            };
+        }),
         ...(isEmptyImageNode ? [] : [rootNode]),
         ...childNodes,
     ]);
@@ -190,16 +196,28 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
     );
     if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
     setNodes((prev) =>
-        prev.map((node) =>
-            node.id === nodeId && isConfigNode
-                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
-                : node.id === nodeId && isEmptyImageNode
-                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
-                  : node.id === rootId && !hasSuccess
-                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: "全部图片生成失败" } }
-                    : node,
-        ),
+        prev.map((node) => {
+            if (node.id === nodeId && isConfigNode) {
+                return { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } };
+            }
+
+            if (node.id === nodeId && isEmptyImageNode) {
+                return { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } };
+            }
+
+            if (node.id === rootId && !hasSuccess) {
+                return { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: "全部图片生成失败" } };
+            }
+
+            return node;
+        }),
     );
+}
+
+function parentNodeTypeForImageGeneration(isConfigNode: boolean, isImageNode: boolean) {
+    if (isConfigNode) return CanvasNodeType.Config;
+    if (isImageNode) return CanvasNodeType.Image;
+    return CanvasNodeType.Text;
 }
 
 export async function retryCanvasImage(params: {

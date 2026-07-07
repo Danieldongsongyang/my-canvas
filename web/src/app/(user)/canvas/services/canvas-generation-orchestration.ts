@@ -5,10 +5,10 @@ import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
 import { NODE_DEFAULT_SIZE } from "../constants";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
 import { applyCanvasImageGenerationError, applyCanvasImageGenerationStart, applyCanvasImageGenerationSuccess, completeCanvasImageGeneration, type CanvasGenerationUiState } from "../utils/canvas-graph-mutations";
 import { fitNodeSize } from "../utils/canvas-node-size";
-import { buildImageGenerationMetadata, imageMetadata, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS } from "../[id]/canvas-page-utils";
+import { buildImageGenerationMetadata, getGenerationCount, imageMetadata, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS } from "../[id]/canvas-page-utils";
 import { materializeCanvasImageMedia, type CanvasNodeMediaAdapter } from "./canvas-node-media";
 
 export type CanvasImageGenerationRequester = {
@@ -68,14 +68,19 @@ const defaultCanvasImageGenerationRequester: CanvasImageGenerationRequester = {
     edit: requestEdit,
 };
 
+const GENERATED_IMAGE_TITLE_LENGTH = 32;
+const TEXT_TO_IMAGE_GAP = 96;
+const BATCH_CHILD_OFFSET = 120;
+const BATCH_CHILD_GAP = 36;
+
 export async function generateCanvasTextToImage(input: CanvasTextToImageGenerationInput): Promise<CanvasTextToImageGenerationResult> {
     const requester = input.requester || defaultCanvasImageGenerationRequester;
     const sourceNode = input.nodes.find((node) => node.id === input.sourceNodeId);
     const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-    const count = imageGenerationCount(input.generationConfig.count);
-    const rootNodeId = input.createId?.() || nanoid();
-    const childNodeIds = count > 1 ? Array.from({ length: count }, () => input.createId?.() || nanoid()) : [];
+    const count = getGenerationCount(input.generationConfig.count);
+    const rootNodeId = createCanvasGenerationId(input.createId);
+    const childNodeIds = createBatchChildNodeIds(count, input.createId);
     const targetNodeIds = count > 1 ? childNodeIds : [rootNodeId];
     const rootNode = createRootImageNode({
         id: rootNodeId,
@@ -86,7 +91,16 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
         referenceImages: input.referenceImages,
         generationConfig: input.generationConfig,
     });
-    const childNodes = childNodeIds.map((id, index) => createChildImageNode({ id, index, rootNode, prompt: input.effectivePrompt, generationConfig: input.generationConfig, referenceImages: input.referenceImages }));
+    const childNodes = childNodeIds.map((id, index) =>
+        createChildImageNode({
+            id,
+            index,
+            rootNode,
+            prompt: input.effectivePrompt,
+            generationConfig: input.generationConfig,
+            referenceImages: input.referenceImages,
+        }),
+    );
     const generationStart = applyCanvasImageGenerationStart({
         nodes: input.nodes,
         connections: input.connections,
@@ -100,8 +114,8 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
         },
         generatedNodes: [rootNode, ...childNodes],
         generatedConnections: [
-            { id: input.createConnectionId?.() || nanoid(), fromNodeId: input.sourceNodeId, toNodeId: rootNodeId },
-            ...childNodeIds.map((childNodeId) => ({ id: input.createConnectionId?.() || nanoid(), fromNodeId: rootNodeId, toNodeId: childNodeId })),
+            { id: createCanvasGenerationId(input.createConnectionId), fromNodeId: input.sourceNodeId, toNodeId: rootNodeId },
+            ...childNodeIds.map((childNodeId) => ({ id: createCanvasGenerationId(input.createConnectionId), fromNodeId: rootNodeId, toNodeId: childNodeId })),
         ],
         dialogNodeId: input.sourceNodeId,
     });
@@ -161,16 +175,7 @@ export async function retryCanvasGeneratedImage(input: CanvasGeneratedImageRetry
     const uploadedImage = await materializeCanvasImageMedia({ dataUrl: image.dataUrl }, input.mediaAdapter);
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
-    const generationMetadata = input.savedImageMetadata?.generationType
-        ? {
-              generationType: input.savedImageMetadata.generationType,
-              model: input.generationConfig.model,
-              size: input.generationConfig.size,
-              quality: input.generationConfig.quality,
-              count: input.savedImageMetadata.count || 1,
-              references: input.savedImageMetadata.references,
-          }
-        : buildImageGenerationMetadata(input.useReferenceImages ? "edit" : "generation", input.generationConfig, 1, input.retryImages);
+    const generationMetadata = retryGenerationMetadata(input);
 
     return applyCanvasImageGenerationSuccess({
         nodes: input.nodes,
@@ -190,9 +195,9 @@ function createRootImageNode(params: { id: string; sourceNode?: CanvasNodeData; 
     return {
         id: params.id,
         type: CanvasNodeType.Image,
-        title: params.prompt.slice(0, 32) || "Generated Image",
+        title: generatedImageTitle(params.prompt),
         position: {
-            x: sourcePosition.x + textConfig.width + 96,
+            x: sourcePosition.x + textConfig.width + TEXT_TO_IMAGE_GAP,
             y: sourcePosition.y + textConfig.height / 2 - imageConfig.height / 2,
         },
         width: imageConfig.width,
@@ -203,7 +208,7 @@ function createRootImageNode(params: { id: string; sourceNode?: CanvasNodeData; 
             isBatchRoot: params.count > 1,
             batchChildIds: params.count > 1 ? params.childNodeIds : undefined,
             batchUsesReferenceImages: params.referenceImages.length > 0,
-            ...buildImageGenerationMetadata(params.referenceImages.length ? "edit" : "generation", params.generationConfig, params.count, params.referenceImages),
+            ...buildImageGenerationMetadata(generationTypeForReferences(params.referenceImages), params.generationConfig, params.count, params.referenceImages),
             imageBatchExpanded: params.count > 1 ? true : undefined,
         },
     };
@@ -215,10 +220,10 @@ function createChildImageNode(params: { id: string; index: number; rootNode: Can
     return {
         id: params.id,
         type: CanvasNodeType.Image,
-        title: params.prompt.slice(0, 32) || "Generated Image",
+        title: generatedImageTitle(params.prompt),
         position: {
-            x: params.rootNode.position.x + params.rootNode.width + 120 + (params.index % 2) * (imageConfig.width + 36),
-            y: params.rootNode.position.y + Math.floor(params.index / 2) * (imageConfig.height + 36),
+            x: params.rootNode.position.x + params.rootNode.width + BATCH_CHILD_OFFSET + (params.index % 2) * (imageConfig.width + BATCH_CHILD_GAP),
+            y: params.rootNode.position.y + Math.floor(params.index / 2) * (imageConfig.height + BATCH_CHILD_GAP),
         },
         width: imageConfig.width,
         height: imageConfig.height,
@@ -226,7 +231,7 @@ function createChildImageNode(params: { id: string; index: number; rootNode: Can
             prompt: params.prompt,
             status: NODE_STATUS_LOADING,
             batchRootId: params.rootNode.id,
-            ...buildImageGenerationMetadata(params.referenceImages.length ? "edit" : "generation", params.generationConfig, 1, params.referenceImages),
+            ...buildImageGenerationMetadata(generationTypeForReferences(params.referenceImages), params.generationConfig, 1, params.referenceImages),
         },
     };
 }
@@ -238,8 +243,36 @@ async function requestOneImage(params: { requester: CanvasImageGenerationRequest
     return image;
 }
 
-function imageGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
+function retryGenerationMetadata(input: CanvasGeneratedImageRetryInput): CanvasNodeMetadata {
+    if (input.savedImageMetadata?.generationType) {
+        return {
+            generationType: input.savedImageMetadata.generationType,
+            model: input.generationConfig.model,
+            size: input.generationConfig.size,
+            quality: input.generationConfig.quality,
+            count: input.savedImageMetadata.count || 1,
+            references: input.savedImageMetadata.references,
+        };
+    }
+
+    return buildImageGenerationMetadata(input.useReferenceImages ? "edit" : "generation", input.generationConfig, 1, input.retryImages);
+}
+
+function createBatchChildNodeIds(count: number, createId?: () => string) {
+    if (count <= 1) return [];
+    return Array.from({ length: count }, () => createCanvasGenerationId(createId));
+}
+
+function createCanvasGenerationId(createId?: () => string) {
+    return createId?.() || nanoid();
+}
+
+function generatedImageTitle(prompt: string) {
+    return prompt.slice(0, GENERATED_IMAGE_TITLE_LENGTH) || "Generated Image";
+}
+
+function generationTypeForReferences(referenceImages: ReferenceImage[]): CanvasImageGenerationType {
+    return referenceImages.length ? "edit" : "generation";
 }
 
 function errorMessage(error: unknown) {
