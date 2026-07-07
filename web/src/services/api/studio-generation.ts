@@ -548,12 +548,11 @@ export async function generateStoryboardShotImages(input: GenerateStoryboardShot
     if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
 
     const snapshot = buildStoryboardGenerationSnapshot({ shot, artDirection, model, count: input.count, createdAt: now() });
-    const resolvedReferences = resolveStudioShotReferences({ episode, shot, assets: input.assets });
-    const references = resolvedReferences.referenceImages;
-    if (!references.length && !input.allowNoReferences) throw new StudioGenerationError("缺少 Cast selected reference images。请先补齐显式引用和主参考图，或明确允许无参考生成。");
+    const referenceImages = resolveStudioShotReferences({ episode, shot, assets: input.assets }).referenceImages;
+    if (!referenceImages.length && !input.allowNoReferences) throw new StudioGenerationError("缺少 Cast selected reference images。请先补齐显式引用和主参考图，或明确允许无参考生成。");
 
-    const images = references.length
-        ? await requestEdit({ ...input.config, model, imageModel: model, count: String(input.count), size: snapshot.aspectRatio }, snapshot.effectivePrompt, references)
+    const images = referenceImages.length
+        ? await requestEdit({ ...input.config, model, imageModel: model, count: String(input.count), size: snapshot.aspectRatio }, snapshot.effectivePrompt, referenceImages)
         : await requestGeneration({ ...input.config, model, imageModel: model, count: String(input.count), size: snapshot.aspectRatio }, snapshot.effectivePrompt);
     if (!images.length) throw new StudioGenerationError("接口没有返回图片");
 
@@ -574,7 +573,7 @@ export async function generateStoryboardShotImages(input: GenerateStoryboardShot
             effectivePrompt: snapshot.effectivePrompt,
             negativePrompt: snapshot.negativePrompt,
             model,
-            referenceAssetIds: references.map((reference) => reference.id),
+            referenceAssetIds: referenceImages.map((reference) => reference.id),
             count: input.count,
             aspectRatio: snapshot.aspectRatio,
             batchId,
@@ -660,12 +659,12 @@ export async function generateMissingStoryboardShotImages(input: GenerateMissing
     for (const target of selectStoryboardShotTargets(episode, input.target)) {
         const shot = episode.shots.find((item) => item.id === target.id);
         if (!shot) continue;
-        const resolvedReferences = resolveStudioShotReferences({ episode, shot, assets: input.assets });
-        if (!resolvedReferences.referenceCount) {
+        const referenceResolution = resolveStudioShotReferences({ episode, shot, assets: input.assets });
+        if (!referenceResolution.referenceCount) {
             results.push({ shotId: shot.id, title: shot.title, status: "skipped", createdAssetIds: [], reason: "no-explicit-references" });
             continue;
         }
-        if (resolvedReferences.readyCount < resolvedReferences.referenceCount) {
+        if (referenceResolution.readyCount < referenceResolution.referenceCount) {
             results.push({ shotId: shot.id, title: shot.title, status: "skipped", createdAssetIds: [], reason: "missing-reference-images" });
             continue;
         }

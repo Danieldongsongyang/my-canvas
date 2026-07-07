@@ -1472,9 +1472,9 @@ function ShotWorkbenchModal({
 
     if (!shotId || !shot) return null;
 
-    const resolvedReferences = resolveStudioShotReferences({ episode, shot, assets, references });
-    const readyReferences = resolvedReferences.ready;
-    const explicitReferenceCount = resolvedReferences.referenceCount;
+    const referenceResolution = resolveStudioShotReferences({ episode, shot, assets, references });
+    const readyReferences = referenceResolution.ready;
+    const explicitReferenceCount = referenceResolution.referenceCount;
     const imageRefs = shot.assetRefs.filter((ref) => ref.kind === "image" && (ref.role === "selected" || ref.role === "candidate"));
     const selectedImageRef = imageRefs.find((ref) => ref.role === "selected");
     const selectedImageAsset = selectedImageRef ? assetMap.get(selectedImageRef.assetId) : undefined;
@@ -1526,7 +1526,7 @@ function ShotWorkbenchModal({
                                     {readyReferences.map(({ id, label, referenceImage }) => (
                                         <div key={`${label}-${id}`} className="overflow-hidden rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0a090c]/75">
                                             <div className="flex aspect-[4/3] items-center justify-center bg-black/25 text-[#8b8597]">
-                                                <img src={referenceImage?.dataUrl || ""} alt={label} className="h-full w-full object-cover" />
+                                                <img src={referenceImage.dataUrl} alt={label} className="h-full w-full object-cover" />
                                             </div>
                                             <p className="truncate px-2 py-1.5 text-xs text-[#a8a2b0]">{label}</p>
                                         </div>

@@ -20,7 +20,7 @@ export type StudioShotMissingReference = {
 };
 
 export type StudioShotResolvedReference = StudioShotReferenceChip & {
-    referenceImage?: ReferenceImage;
+    referenceImage: ReferenceImage;
 };
 
 export type StudioShotReferenceResolution = {
@@ -36,19 +36,27 @@ export type StudioShotReferenceResolution = {
 };
 
 type StudioCastEntity = StudioCharacter | StudioScene | StudioProp;
+type StudioImageAsset = Extract<Asset, { kind: "image" }>;
+type StudioShotReferenceEntry = StudioShotReferenceChip & {
+    referenceImage?: ReferenceImage;
+    missing?: StudioShotMissingReference;
+};
+type ResolveStudioShotReferencesInput = {
+    episode: StudioEpisode;
+    shot: StudioShot;
+    assets?: Asset[];
+    references?: StudioShotReferences;
+};
 
-export function resolveStudioShotReferences(input: { episode: StudioEpisode; shot: StudioShot; assets?: Asset[]; references?: StudioShotReferences }): StudioShotReferenceResolution {
-    const assetMap = new Map((input.assets ?? []).filter((asset) => asset.kind === "image").map((asset) => [asset.id, asset]));
-    const normalizedReferences = input.references ? normalizeShotReferences(input.references) : readNormalizedShotReferences(input.shot);
-    const entries = [
-        ...normalizedReferences.characterIds.map((id) => resolveReferenceEntry("character", id, input.episode.characters, assetMap)),
-        ...normalizedReferences.sceneIds.map((id) => resolveReferenceEntry("scene", id, input.episode.scenes, assetMap)),
-        ...normalizedReferences.propIds.map((id) => resolveReferenceEntry("prop", id, input.episode.props, assetMap)),
-    ];
-    const chips = entries.map(({ referenceImage: _referenceImage, missing, ...chip }) => chip);
+export function resolveStudioShotReferences(input: ResolveStudioShotReferencesInput): StudioShotReferenceResolution {
+    const { episode, shot, assets = [], references } = input;
+    const assetMap = buildImageAssetMap(assets);
+    const normalizedReferences = normalizeShotReferences(references ?? shot.metadata?.references);
+    const entries = buildReferenceEntries(episode, normalizedReferences, assetMap);
+    const chips = entries.map(toReferenceChip);
     const missing = entries.flatMap((entry) => (entry.missing ? [entry.missing] : []));
-    const ready = entries.filter((entry) => entry.referenceImage).map(({ missing: _missing, ...entry }) => entry);
-    const referenceImages = ready.map((entry) => entry.referenceImage).filter((image): image is ReferenceImage => Boolean(image));
+    const ready = entries.flatMap(toReadyReference);
+    const referenceImages = ready.map((entry) => entry.referenceImage);
     const referenceCount = entries.length;
 
     return {
@@ -76,7 +84,19 @@ export function normalizeShotReferences(references: Partial<StudioShotReferences
     };
 }
 
-function resolveReferenceEntry(kind: StudioShotReferenceKind, id: string, entities: StudioCastEntity[], assetMap: Map<string, Extract<Asset, { kind: "image" }>>): StudioShotResolvedReference & { missing?: StudioShotMissingReference } {
+function buildImageAssetMap(assets: Asset[]) {
+    return new Map(assets.filter((asset): asset is StudioImageAsset => asset.kind === "image").map((asset) => [asset.id, asset]));
+}
+
+function buildReferenceEntries(episode: StudioEpisode, references: StudioShotReferences, assetMap: Map<string, StudioImageAsset>): StudioShotReferenceEntry[] {
+    return [
+        ...references.characterIds.map((id) => resolveReferenceEntry("character", id, episode.characters, assetMap)),
+        ...references.sceneIds.map((id) => resolveReferenceEntry("scene", id, episode.scenes, assetMap)),
+        ...references.propIds.map((id) => resolveReferenceEntry("prop", id, episode.props, assetMap)),
+    ];
+}
+
+function resolveReferenceEntry(kind: StudioShotReferenceKind, id: string, entities: StudioCastEntity[], assetMap: Map<string, StudioImageAsset>): StudioShotReferenceEntry {
     const entity = entities.find((item) => item.id === id);
     if (!entity) {
         return {
@@ -102,17 +122,38 @@ function resolveReferenceEntry(kind: StudioShotReferenceKind, id: string, entiti
     };
 }
 
+function toReferenceChip(entry: StudioShotReferenceEntry): StudioShotReferenceChip {
+    const chip: StudioShotReferenceChip = {
+        kind: entry.kind,
+        id: entry.id,
+        label: entry.label,
+        ready: entry.ready,
+    };
+    if ("selectedAssetId" in entry) chip.selectedAssetId = entry.selectedAssetId;
+    return chip;
+}
+
+function toReadyReference(entry: StudioShotReferenceEntry): StudioShotResolvedReference[] {
+    if (!entry.referenceImage) return [];
+    return [
+        {
+            ...toReferenceChip(entry),
+            referenceImage: entry.referenceImage,
+        },
+    ];
+}
+
 function normalizeReferenceIds(ids: unknown) {
     if (!Array.isArray(ids)) return [];
     const seen = new Set<string>();
     const normalized: string[] = [];
-    ids.forEach((id) => {
-        if (typeof id !== "string") return;
+    for (const id of ids) {
+        if (typeof id !== "string") continue;
         const value = id.trim();
-        if (!value || seen.has(value)) return;
+        if (!value || seen.has(value)) continue;
         seen.add(value);
         normalized.push(value);
-    });
+    }
     return normalized;
 }
 
@@ -120,7 +161,7 @@ function getSelectedImageRef(refs: StudioAssetRef[]) {
     return refs.find((ref) => ref.kind === "image" && ref.role === "selected");
 }
 
-function toReferenceImage(asset: Extract<Asset, { kind: "image" }>): ReferenceImage {
+function toReferenceImage(asset: StudioImageAsset): ReferenceImage {
     return {
         id: asset.id,
         name: asset.title,
