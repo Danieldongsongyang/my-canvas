@@ -17,6 +17,11 @@ type CanvasFileStorageAdapter = {
     deleteStorageKeys: (keys: Iterable<string>) => Promise<void>;
 };
 
+type CanvasStorageCleanupAdapter = {
+    listStorageKeys: () => Promise<string[]>;
+    deleteStorageKeys: (keys: Iterable<string>) => Promise<void>;
+};
+
 export type CanvasNodeMediaAdapter = {
     image: CanvasImageStorageAdapter;
     media: CanvasFileStorageAdapter;
@@ -49,7 +54,7 @@ type HydratableAssistantImageMedia = {
 };
 
 const IMAGE_STORAGE_KEY_PREFIX = "image:";
-const MEDIA_STORAGE_KEY_PREFIXES = ["video:", "audio:", "file:", "video-reference:", "audio-reference:"];
+const CANVAS_NODE_MEDIA_STORAGE_KEY_PREFIXES = [IMAGE_STORAGE_KEY_PREFIX, "video:", "audio:", "file:", "video-reference:", "audio-reference:"];
 
 const defaultCanvasNodeMediaAdapter: CanvasNodeMediaAdapter = {
     image: {
@@ -67,13 +72,7 @@ const defaultCanvasNodeMediaAdapter: CanvasNodeMediaAdapter = {
 };
 
 export async function hydrateCanvasNodeMedia(node: CanvasNodeData, adapter: CanvasNodeMediaAdapter = defaultCanvasNodeMediaAdapter): Promise<CanvasNodeData> {
-    if (!node.metadata?.content) return node;
-    if (node.type === CanvasNodeType.Image) {
-        const metadata = await hydrateImageMetadata(node.metadata, adapter.image);
-        return metadata === node.metadata ? node : { ...node, metadata };
-    }
-    if (node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) return node;
-    const metadata = await hydrateFileMetadata(node.type, node.metadata, adapter.media);
+    const metadata = await hydrateCanvasNodeMetadata(node, adapter);
     return metadata === node.metadata ? node : { ...node, metadata };
 }
 
@@ -105,9 +104,9 @@ export async function materializeCanvasImageMedia(input: CanvasImageMediaInput, 
 
 export async function cleanupUnusedCanvasNodeMedia(input: CanvasNodeMediaCleanupInput, adapter: CanvasNodeMediaAdapter = defaultCanvasNodeMediaAdapter): Promise<void> {
     const usedKeys = collectCanvasNodeMediaStorageKeys(input);
-    const unusedImageKeys = (await adapter.image.listStorageKeys()).filter((key) => !usedKeys.has(key));
-    const unusedMediaKeys = (await adapter.media.listStorageKeys()).filter((key) => !usedKeys.has(key));
-    await Promise.all([unusedImageKeys.length ? adapter.image.deleteStorageKeys(unusedImageKeys) : undefined, unusedMediaKeys.length ? adapter.media.deleteStorageKeys(unusedMediaKeys) : undefined]);
+    const unusedImageKeys = await listUnusedStorageKeys(adapter.image, usedKeys);
+    const unusedMediaKeys = await listUnusedStorageKeys(adapter.media, usedKeys);
+    await Promise.all([deleteStorageKeys(adapter.image, unusedImageKeys), deleteStorageKeys(adapter.media, unusedMediaKeys)]);
 }
 
 export async function cleanupUnusedCanvasImageMedia(input: CanvasImageMediaCleanupInput, adapter: CanvasNodeMediaAdapter = defaultCanvasNodeMediaAdapter): Promise<void> {
@@ -115,37 +114,11 @@ export async function cleanupUnusedCanvasImageMedia(input: CanvasImageMediaClean
 }
 
 export function collectCanvasImageStorageKeys(value: unknown, keys = new Set<string>()): Set<string> {
-    if (!value || typeof value !== "object") return keys;
-
-    const storageKey = "storageKey" in value ? value.storageKey : undefined;
-    if (typeof storageKey === "string" && storageKey.startsWith(IMAGE_STORAGE_KEY_PREFIX)) keys.add(storageKey);
-
-    for (const item of Object.values(value)) {
-        if (Array.isArray(item)) {
-            item.forEach((child) => collectCanvasImageStorageKeys(child, keys));
-        } else {
-            collectCanvasImageStorageKeys(item, keys);
-        }
-    }
-
-    return keys;
+    return collectCanvasStorageKeys(value, keys, isCanvasImageStorageKey);
 }
 
 export function collectCanvasNodeMediaStorageKeys(value: unknown, keys = new Set<string>()): Set<string> {
-    if (!value || typeof value !== "object") return keys;
-
-    const storageKey = "storageKey" in value ? value.storageKey : undefined;
-    if (typeof storageKey === "string" && isCanvasNodeMediaStorageKey(storageKey)) keys.add(storageKey);
-
-    for (const item of Object.values(value)) {
-        if (Array.isArray(item)) {
-            item.forEach((child) => collectCanvasNodeMediaStorageKeys(child, keys));
-        } else {
-            collectCanvasNodeMediaStorageKeys(item, keys);
-        }
-    }
-
-    return keys;
+    return collectCanvasStorageKeys(value, keys, isCanvasNodeMediaStorageKey);
 }
 
 async function hydrateAssistantMessageImageMedia(message: CanvasAssistantMessage, adapter: CanvasNodeMediaAdapter): Promise<CanvasAssistantMessage> {
@@ -162,6 +135,20 @@ async function hydrateAssistantImageMediaItem<T extends HydratableAssistantImage
 
     const image = await adapter.image.upload(item.dataUrl);
     return { ...item, dataUrl: image.url, storageKey: image.storageKey };
+}
+
+async function hydrateCanvasNodeMetadata(node: CanvasNodeData, adapter: CanvasNodeMediaAdapter): Promise<CanvasNodeMetadata | undefined> {
+    if (!node.metadata?.content) return node.metadata;
+
+    switch (node.type) {
+        case CanvasNodeType.Image:
+            return hydrateImageMetadata(node.metadata, adapter.image);
+        case CanvasNodeType.Video:
+        case CanvasNodeType.Audio:
+            return hydrateFileMetadata(node.type, node.metadata, adapter.media);
+        default:
+            return node.metadata;
+    }
 }
 
 async function hydrateImageMetadata(metadata: CanvasNodeMetadata, adapter: CanvasImageStorageAdapter): Promise<CanvasNodeMetadata> {
@@ -204,6 +191,32 @@ function buildFileMetadata(file: UploadedFile, metadata: CanvasNodeMetadata): Ca
     };
 }
 
+async function listUnusedStorageKeys(adapter: CanvasStorageCleanupAdapter, usedKeys: Set<string>) {
+    return (await adapter.listStorageKeys()).filter((key) => !usedKeys.has(key));
+}
+
+async function deleteStorageKeys(adapter: CanvasStorageCleanupAdapter, keys: string[]) {
+    if (keys.length) await adapter.deleteStorageKeys(keys);
+}
+
+function collectCanvasStorageKeys(value: unknown, keys: Set<string>, isStorageKey: (value: string) => boolean): Set<string> {
+    if (typeof value === "string") {
+        if (isStorageKey(value)) keys.add(value);
+        return keys;
+    }
+    if (!value || typeof value !== "object") return keys;
+
+    for (const child of Object.values(value)) {
+        collectCanvasStorageKeys(child, keys, isStorageKey);
+    }
+
+    return keys;
+}
+
+function isCanvasImageStorageKey(storageKey: string) {
+    return storageKey.startsWith(IMAGE_STORAGE_KEY_PREFIX);
+}
+
 function isCanvasNodeMediaStorageKey(storageKey: string) {
-    return storageKey.startsWith(IMAGE_STORAGE_KEY_PREFIX) || MEDIA_STORAGE_KEY_PREFIXES.some((prefix) => storageKey.startsWith(prefix));
+    return CANVAS_NODE_MEDIA_STORAGE_KEY_PREFIXES.some((prefix) => storageKey.startsWith(prefix));
 }

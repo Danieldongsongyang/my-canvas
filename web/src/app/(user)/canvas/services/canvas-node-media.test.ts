@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CanvasProject } from "../stores/use-canvas-store";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasNodeData } from "../types";
-import { cleanupUnusedCanvasNodeMedia, hydrateCanvasAssistantImageMedia, hydrateCanvasNodeMedia, materializeCanvasImageMedia, type CanvasNodeMediaAdapter } from "./canvas-node-media";
+import { cleanupUnusedCanvasNodeMedia, collectCanvasNodeMediaStorageKeys, hydrateCanvasAssistantImageMedia, hydrateCanvasNodeMedia, materializeCanvasImageMedia, type CanvasNodeMediaAdapter } from "./canvas-node-media";
 
 function createAdapter(): CanvasNodeMediaAdapter {
     const imageEntries = new Map([
@@ -20,9 +20,27 @@ function createAdapter(): CanvasNodeMediaAdapter {
         ["video:orphan", "blob:video-orphan"],
         ["audio:orphan", "blob:audio-orphan"],
     ]);
+    const uploadImage = vi.fn(async (input: string | Blob) => ({
+        url: `blob:migrated:${String(input).slice(-3)}`,
+        storageKey: "image:migrated",
+        width: 640,
+        height: 480,
+        bytes: 123,
+        mimeType: "image/png",
+    }));
+    const uploadMedia = vi.fn(async (input: string | Blob, prefix = "file") => ({
+        url: `blob:${prefix}:migrated:${String(input).slice(-3)}`,
+        storageKey: `${prefix}:migrated`,
+        bytes: 456,
+        mimeType: `${prefix}/mp4`,
+        width: prefix === "video" ? 1280 : undefined,
+        height: prefix === "video" ? 720 : undefined,
+        durationMs: 9000,
+    }));
+
     return {
         image: {
-            upload: vi.fn(async (input: string | Blob) => ({ url: `blob:migrated:${String(input).slice(-3)}`, storageKey: "image:migrated", width: 640, height: 480, bytes: 123, mimeType: "image/png" })),
+            upload: uploadImage,
             resolveUrl: vi.fn(async (storageKey: string, fallback = "") => imageEntries.get(storageKey) || fallback),
             listStorageKeys: vi.fn(async () => Array.from(imageEntries.keys())),
             deleteStorageKeys: vi.fn(async (keys: Iterable<string>) => {
@@ -30,7 +48,7 @@ function createAdapter(): CanvasNodeMediaAdapter {
             }),
         },
         media: {
-            upload: vi.fn(async (input: string | Blob, prefix = "file") => ({ url: `blob:${prefix}:migrated:${String(input).slice(-3)}`, storageKey: `${prefix}:migrated`, bytes: 456, mimeType: `${prefix}/mp4`, width: prefix === "video" ? 1280 : undefined, height: prefix === "video" ? 720 : undefined, durationMs: 9000 })),
+            upload: uploadMedia,
             resolveUrl: vi.fn(async (storageKey: string, fallback = "") => mediaEntries.get(storageKey) || fallback),
             listStorageKeys: vi.fn(async () => Array.from(mediaEntries.keys())),
             deleteStorageKeys: vi.fn(async (keys: Iterable<string>) => {
@@ -80,7 +98,7 @@ function assistantSession(): CanvasAssistantSession {
     };
 }
 
-describe("canvas node image media", () => {
+describe("canvas node media", () => {
     it("hydrates persisted image node storage keys to displayable URLs", async () => {
         const adapter = createAdapter();
         const node = imageNode({ content: "blob:stale", storageKey: "image:node", status: "success" });
@@ -92,11 +110,29 @@ describe("canvas node image media", () => {
 
     it("hydrates persisted video and audio node storage keys to playable URLs with stable metadata", async () => {
         const adapter = createAdapter();
+        const video = videoNode({
+            content: "blob:stale",
+            storageKey: "video:node",
+            status: "success",
+            naturalWidth: 1280,
+            naturalHeight: 720,
+            bytes: 456,
+            mimeType: "video/mp4",
+            durationMs: 9000,
+        });
+        const audio = audioNode({
+            content: "blob:old",
+            storageKey: "audio:node",
+            status: "success",
+            bytes: 222,
+            mimeType: "audio/mpeg",
+            durationMs: 3000,
+        });
 
-        await expect(hydrateCanvasNodeMedia(videoNode({ content: "blob:stale", storageKey: "video:node", status: "success", naturalWidth: 1280, naturalHeight: 720, bytes: 456, mimeType: "video/mp4", durationMs: 9000 }), adapter)).resolves.toMatchObject({
+        await expect(hydrateCanvasNodeMedia(video, adapter)).resolves.toMatchObject({
             metadata: { content: "blob:video-node", storageKey: "video:node", naturalWidth: 1280, naturalHeight: 720, bytes: 456, mimeType: "video/mp4", durationMs: 9000 },
         });
-        await expect(hydrateCanvasNodeMedia(audioNode({ content: "blob:old", storageKey: "audio:node", status: "success", bytes: 222, mimeType: "audio/mpeg", durationMs: 3000 }), adapter)).resolves.toMatchObject({
+        await expect(hydrateCanvasNodeMedia(audio, adapter)).resolves.toMatchObject({
             metadata: { content: "blob:audio-node", storageKey: "audio:node", bytes: 222, mimeType: "audio/mpeg", durationMs: 3000 },
         });
     });
@@ -140,7 +176,20 @@ describe("canvas node image media", () => {
         });
     });
 
-    it("cleans up only image media unused by projects, history, assistant sessions, or local assets", async () => {
+    it("collects canvas node media keys from storage fields and reference strings", () => {
+        const keys = collectCanvasNodeMediaStorageKeys({
+            nodes: [
+                imageNode({ storageKey: "image:node", references: ["image:history"] }),
+                videoNode({ storageKey: "video:node", references: ["video:history", "video-reference:node"] }),
+                audioNode({ storageKey: "audio:node", references: ["audio:extra", "audio-reference:node"] }),
+            ],
+            ignored: ["not-a-storage-key", "http://example.test/image:node"],
+        });
+
+        expect([...keys].sort()).toEqual(["audio-reference:node", "audio:extra", "audio:node", "image:history", "image:node", "video-reference:node", "video:history", "video:node"]);
+    });
+
+    it("cleans up unused node media while keeping image media used by projects, history, assistant sessions, or local assets", async () => {
         const adapter = createAdapter();
 
         await cleanupUnusedCanvasNodeMedia(
@@ -153,6 +202,7 @@ describe("canvas node image media", () => {
         );
 
         expect(adapter.image.deleteStorageKeys).toHaveBeenCalledWith(["image:orphan"]);
+        expect(adapter.media.deleteStorageKeys).toHaveBeenCalledWith(["video:node", "audio:node", "video:history", "audio:extra", "video:orphan", "audio:orphan"]);
     });
 
     it("cleans up image, video, and audio media through one module-level behavior", async () => {
