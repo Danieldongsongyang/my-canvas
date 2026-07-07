@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
+import { appendStudioImageVariants, getSelectedStudioImageVariant, removeStudioImageCandidateVariant, selectStudioImageVariant, upsertStudioImageVariant } from "@/services/studio-image-variants";
 import type { StudioAssetRef, StudioEpisodePatch, StudioShot, StudioShotReferences, StudioCharacter, StudioProp, StudioScene, createStudioRepository, StudioEpisode, StudioSeries } from "@/services/studio-local";
 import { resolveStudioShotReferences } from "@/services/studio-shot-reference-resolver";
 import type { Asset } from "@/stores/use-asset-store";
@@ -455,7 +456,7 @@ export async function removeCastCandidateReference(input: RemoveCastCandidateRef
 
     const updatedEntity = {
         ...entity,
-        assetRefs: entity.assetRefs.filter((ref) => !(ref.kind === "image" && ref.assetId === input.assetId && ref.role === "candidate")),
+        assetRefs: removeStudioImageCandidateVariant(entity.assetRefs, input.assetId),
     };
     return input.repository.updateEpisode(input.seriesId, input.episodeId, patchEpisodeCastEntity(episode, input.kind, updatedEntity));
 }
@@ -637,7 +638,7 @@ export async function removeStoryboardShotCandidateReference(input: RemoveStoryb
     if (targetRef.role !== "candidate") throw new StudioGenerationError("只能移除 candidate 分镜图。");
 
     return input.repository.updateEpisode(input.seriesId, input.episodeId, {
-        shots: episode.shots.map((item) => (item.id === input.shotId ? { ...item, assetRefs: item.assetRefs.filter((ref) => !(ref.kind === "image" && ref.assetId === input.assetId && ref.role === "candidate")) } : item)),
+        shots: episode.shots.map((item) => (item.id === input.shotId ? { ...item, assetRefs: removeStudioImageCandidateVariant(item.assetRefs, input.assetId) } : item)),
     });
 }
 
@@ -932,31 +933,19 @@ function castKindLabel(kind: StudioCastTargetKind) {
 }
 
 function appendGeneratedImageRefs(entity: StudioCastEntity, refs: StudioAssetRef[], snapshot: StudioCastGenerationSnapshot): StudioCastEntity {
-    const hasSelected = Boolean(getSelectedImageRef(entity));
-    const nextRefs = [...entity.assetRefs];
-    refs.forEach((ref, index) => {
-        if (nextRefs.some((item) => item.kind === "image" && item.assetId === ref.assetId)) return;
-        nextRefs.push({ ...ref, role: !hasSelected && index === 0 ? "selected" : "candidate" });
-    });
     return withCastGenerationImage(
         {
             ...entity,
-            assetRefs: normalizeSingleSelectedImageRef(nextRefs),
+            assetRefs: appendStudioImageVariants(entity.assetRefs, refs),
         },
         { ...snapshot, status: "completed" },
     );
 }
 
 function appendGeneratedShotImageRefs(shot: StudioShot, refs: StudioAssetRef[], snapshot: StudioStoryboardGenerationSnapshot): StudioShot {
-    const hasSelected = Boolean(getSelectedImageRef(shot));
-    const nextRefs = [...shot.assetRefs];
-    refs.forEach((ref, index) => {
-        if (nextRefs.some((item) => item.kind === "image" && item.assetId === ref.assetId)) return;
-        nextRefs.push({ ...ref, role: !hasSelected && index === 0 ? "selected" : "candidate" });
-    });
     return {
         ...shot,
-        assetRefs: normalizeSingleSelectedImageRef(nextRefs),
+        assetRefs: appendStudioImageVariants(shot.assetRefs, refs),
         generation: {
             ...shot.generation,
             image: {
@@ -997,35 +986,8 @@ function withCastGenerationImage(entity: StudioCastEntity, snapshot: StudioCastG
     };
 }
 
-function normalizeSingleSelectedImageRef(refs: StudioAssetRef[]) {
-    let selectedSeen = false;
-    return refs.map((ref) => {
-        if (ref.kind !== "image" || ref.role !== "selected") return ref;
-        if (!selectedSeen) {
-            selectedSeen = true;
-            return ref;
-        }
-        return { ...ref, role: "candidate" as const };
-    });
-}
-
 function selectImageAssetRef(refs: StudioAssetRef[], assetId: string) {
-    const deduped: StudioAssetRef[] = [];
-    for (const ref of refs) {
-        if (ref.kind === "image" && deduped.some((item) => item.kind === "image" && item.assetId === ref.assetId)) continue;
-        deduped.push(ref);
-    }
-    if (!deduped.some((ref) => ref.kind === "image" && ref.assetId === assetId)) {
-        deduped.push({ assetId, kind: "image", role: "candidate" });
-    }
-    return normalizeSingleSelectedImageRef(
-        deduped.map((ref) => {
-            if (ref.kind !== "image") return ref;
-            if (ref.assetId === assetId) return { ...ref, role: "selected" as const };
-            if (ref.role === "selected") return { ...ref, role: "candidate" as const };
-            return ref;
-        }),
-    );
+    return selectStudioImageVariant(refs, assetId);
 }
 
 function upsertLibraryImageAssetRef(
@@ -1038,44 +1000,26 @@ function upsertLibraryImageAssetRef(
         createdAt: string;
     },
 ) {
-    const deduped: StudioAssetRef[] = [];
-    for (const ref of refs) {
-        if (ref.kind === "image" && deduped.some((item) => item.kind === "image" && item.assetId === ref.assetId)) continue;
-        deduped.push(ref);
-    }
-
-    const hasExisting = deduped.some((ref) => ref.kind === "image" && ref.assetId === input.assetId);
-    const nextRefs = hasExisting
-        ? deduped
-        : [
-              ...deduped,
-              {
-                  assetId: input.assetId,
-                  kind: "image" as const,
-                  role: "candidate" as const,
-                  note: "从素材库加入 Cast 参考池",
-                  metadata: {
-                      source: "asset-library",
-                      entityKind: input.kind,
-                      entityId: input.entityId,
-                      createdAt: input.createdAt,
-                  },
-              },
-          ];
-
-    if (input.role === "candidate") return normalizeSingleSelectedImageRef(nextRefs);
-    return normalizeSingleSelectedImageRef(
-        nextRefs.map((ref) => {
-            if (ref.kind !== "image") return ref;
-            if (ref.assetId === input.assetId) return { ...ref, role: "selected" as const };
-            if (ref.role === "selected") return { ...ref, role: "candidate" as const };
-            return ref;
+    return upsertStudioImageVariant(refs, {
+        assetId: input.assetId,
+        role: input.role,
+        createRef: () => ({
+            assetId: input.assetId,
+            kind: "image",
+            role: "candidate",
+            note: "从素材库加入 Cast 参考池",
+            metadata: {
+                source: "asset-library",
+                entityKind: input.kind,
+                entityId: input.entityId,
+                createdAt: input.createdAt,
+            },
         }),
-    );
+    });
 }
 
 function getSelectedImageRef(entity: Pick<StudioCastEntity | StudioShot, "assetRefs">) {
-    return entity.assetRefs.find((ref) => ref.kind === "image" && ref.role === "selected");
+    return getSelectedStudioImageVariant(entity.assetRefs);
 }
 
 function readCastImageGenerationStatus(entity: StudioCastEntity) {
