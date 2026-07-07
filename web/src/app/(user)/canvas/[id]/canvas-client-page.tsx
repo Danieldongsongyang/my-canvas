@@ -8,7 +8,6 @@ import { saveAs } from "file-saver";
 
 import { DOCS_URL } from "@/constant/env";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { uploadImage } from "@/services/image-storage";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
@@ -44,6 +43,7 @@ import { useTextNodeHandlers } from "../hooks/use-text-node-handlers";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantSession, type CanvasNodeData, type Position } from "../types";
+import { materializeCanvasImageMedia, type CanvasImageMediaInput } from "../services/canvas-node-media";
 import type { PendingConnectionCreate } from "./canvas-page-types";
 import {
     NODE_STATUS_SUCCESS,
@@ -111,6 +111,12 @@ function CanvasRefreshShell() {
             </div>
         </main>
     );
+}
+
+async function materializeImageForNode(input: CanvasImageMediaInput) {
+    const storedImage = await materializeCanvasImageMedia(input);
+    const imageSize = storedImage.width && storedImage.height ? storedImage : await readImageMeta(storedImage.url);
+    return { storedImage, imageSize };
 }
 
 function ConnectionCreateMenu({
@@ -866,9 +872,8 @@ function InfiniteCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
-            const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
-            const config = fitNodeSize(meta.width, meta.height);
+            const { storedImage, imageSize } = await materializeImageForNode(image);
+            const config = fitNodeSize(imageSize.width, imageSize.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const node: CanvasNodeData = {
@@ -878,7 +883,7 @@ function InfiniteCanvasPage() {
                 position: { x: center.x - config.width / 2, y: center.y - config.height / 2 },
                 width: config.width,
                 height: config.height,
-                metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: image.prompt },
+                metadata: { ...imageMetadata({ ...storedImage, width: imageSize.width, height: imageSize.height }), prompt: image.prompt },
             };
 
             setNodes((prev) => [...prev, node]);
@@ -934,9 +939,8 @@ function InfiniteCanvasPage() {
                 ]);
                 setSelectedNodeIds(new Set([id]));
             } else {
-                const storedImage = payload.storageKey ? { url: payload.dataUrl, storageKey: payload.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(payload.dataUrl);
-                const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
-                const config = fitNodeSize(meta.width, meta.height);
+                const { storedImage, imageSize } = await materializeImageForNode(payload);
+                const config = fitNodeSize(imageSize.width, imageSize.height);
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const node: CanvasNodeData = {
@@ -946,7 +950,7 @@ function InfiniteCanvasPage() {
                     position: { x: center.x - config.width / 2, y: center.y - config.height / 2 },
                     width: config.width,
                     height: config.height,
-                    metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: payload.title, assetRef: payload.assetRef },
+                    metadata: { ...imageMetadata({ ...storedImage, width: imageSize.width, height: imageSize.height }), prompt: payload.title, assetRef: payload.assetRef },
                 };
                 setNodes((prev) => [...prev, node]);
                 setSelectedNodeIds(new Set([id]));

@@ -1,5 +1,5 @@
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
-import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
+import { resolveImageUrl, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, type UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -7,6 +7,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type ConnectionHandle, type Position } from "../types";
+import { hydrateCanvasAssistantImageMedia, hydrateCanvasNodeImageMedia } from "../services/canvas-node-media";
 
 export const VIDEO_NODE_MAX_WIDTH = 420;
 export const VIDEO_NODE_MAX_HEIGHT = 420;
@@ -191,39 +192,18 @@ export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
 }
 
 export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
-    return Promise.all(
-        nodes.map(async (node) => {
-            const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (node.type !== CanvasNodeType.Image || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
-            if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
-        }),
-    );
+    return Promise.all(nodes.map(hydrateCanvasNodeMedia));
 }
 
 export async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
-    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
-        if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
-        if (item.dataUrl?.startsWith("data:image/")) {
-            const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
-        }
-        return item;
-    };
-    return Promise.all(
-        sessions.map(async (session) => ({
-            ...session,
-            messages: await Promise.all(
-                session.messages.map(async (message) => ({
-                    ...message,
-                    references: await Promise.all((message.references || []).map(hydrateItem)),
-                    images: await Promise.all((message.images || []).map(hydrateItem)),
-                })),
-            ),
-        })),
-    );
+    return hydrateCanvasAssistantImageMedia(sessions);
+}
+
+async function hydrateCanvasNodeMedia(node: CanvasNodeData): Promise<CanvasNodeData> {
+    if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) {
+        return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, node.metadata.content) } };
+    }
+    return hydrateCanvasNodeImageMedia(node);
 }
 
 export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {

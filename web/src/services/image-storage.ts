@@ -66,6 +66,14 @@ export async function deleteStoredImages(keys: Iterable<string>) {
     );
 }
 
+export async function listStoredImageKeys() {
+    const keys: string[] = [];
+    await store.iterate((_value, key) => {
+        if (key.startsWith("image:")) keys.push(key);
+    });
+    return keys;
+}
+
 export async function cleanupUnusedImages(usedData: unknown) {
     const usedKeys = collectImageStorageKeys(usedData);
     const unused: string[] = [];
