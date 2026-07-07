@@ -1,5 +1,5 @@
 import { formatBytes } from "@/lib/image-utils";
-import type { AssetRef } from "@/services/asset-references";
+import { createLocalAssetReference, type AssetRef } from "@/services/asset-references";
 import type { Asset, AssetKind } from "@/stores/use-asset-store";
 
 type LocalAssetLibraryQuery = {
@@ -43,7 +43,7 @@ export function queryLocalAssetLibrary(assets: Asset[], query: LocalAssetLibrary
 }
 
 export function toInsertAssetPayload(asset: Asset): InsertAssetPayload {
-    const assetRef: AssetRef = { assetId: asset.id, kind: asset.kind, role: "reference" };
+    const assetRef = createLocalAssetReference(asset);
     if (asset.kind === "text") {
         return { kind: "text", content: asset.data.content, title: asset.title, assetRef };
     }

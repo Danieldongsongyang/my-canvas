@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CanvasNodeType, type CanvasNodeData } from "@/app/(user)/canvas/types";
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { createInMemoryStudioStorage, createStudioRepository, type StudioAssetRef, type StudioSeries } from "@/services/studio-local";
-import { checkAssetDeletion, findAssetReferences } from "./asset-references";
+import { checkAssetDeletion, createLocalAssetReference, findAssetReferences } from "./asset-references";
 
 function canvasProject(nodes: CanvasNodeData[]): CanvasProject {
     return {
@@ -167,5 +167,70 @@ describe("asset reference boundary", () => {
 
         expect(findAssetReferences("asset-selected", { studioSeries: [series], canvasProjects: [] }).map((reference) => reference.label)).toEqual(["山海便利店 / Episode 01 / 阿岚"]);
         expect(findAssetReferences("asset-candidate", { studioSeries: [series], canvasProjects: [] }).map((reference) => reference.label)).toEqual(["山海便利店 / Episode 01 / 青蛇"]);
+    });
+
+    it("protects local assets inserted into Canvas until the node or project reference is removed", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const textRef = createLocalAssetReference({ id: "asset-text", kind: "text" });
+        const imageRef = createLocalAssetReference({ id: "asset-image", kind: "image" });
+        const videoRef = createLocalAssetReference({ id: "asset-video", kind: "video" });
+        const project = canvasProject([
+            {
+                id: "text-node",
+                type: CanvasNodeType.Text,
+                title: "标题文案",
+                position: { x: 0, y: 0 },
+                width: 240,
+                height: 120,
+                metadata: { content: "一句品牌文案", assetRef: textRef },
+            },
+            {
+                id: "image-node",
+                type: CanvasNodeType.Image,
+                title: "主视觉",
+                position: { x: 0, y: 0 },
+                width: 320,
+                height: 240,
+                metadata: { content: "blob:image", assetRef: imageRef },
+            },
+            {
+                id: "video-node",
+                type: CanvasNodeType.Video,
+                title: "产品演示",
+                position: { x: 0, y: 0 },
+                width: 320,
+                height: 180,
+                metadata: { content: "blob:video", assetRef: videoRef },
+            },
+        ]);
+
+        await expect(checkAssetDeletion("asset-text", { studioRepository: repository, canvasProjects: [project] })).resolves.toMatchObject({
+            canDelete: false,
+            references: [{ source: "canvas", assetId: "asset-text", label: "分镜草图 / 标题文案", canvasId: "canvas-1", nodeId: "text-node" }],
+        });
+        await expect(checkAssetDeletion("asset-image", { studioRepository: repository, canvasProjects: [project] })).resolves.toEqual({
+            canDelete: false,
+            references: [
+                {
+                    source: "canvas",
+                    assetId: "asset-image",
+                    label: "分镜草图 / 主视觉",
+                    canvasId: "canvas-1",
+                    nodeId: "image-node",
+                },
+            ],
+        });
+        await expect(checkAssetDeletion("asset-video", { studioRepository: repository, canvasProjects: [project] })).resolves.toMatchObject({
+            canDelete: false,
+            references: [{ source: "canvas", assetId: "asset-video", label: "分镜草图 / 产品演示", canvasId: "canvas-1", nodeId: "video-node" }],
+        });
+        await expect(checkAssetDeletion("asset-text", { studioRepository: repository, canvasProjects: [canvasProject(project.nodes.filter((node) => node.id !== "text-node"))] })).resolves.toEqual({
+            canDelete: true,
+            references: [],
+        });
+        await expect(checkAssetDeletion("asset-video", { studioRepository: repository, canvasProjects: [] })).resolves.toEqual({
+            canDelete: true,
+            references: [],
+        });
     });
 });

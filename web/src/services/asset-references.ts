@@ -13,6 +13,17 @@ export type AssetRef = {
     metadata?: Record<string, unknown>;
 };
 
+export type LocalAssetReferenceSource = {
+    id: string;
+    kind: Extract<AssetReferenceKind, "text" | "image" | "video">;
+};
+
+export type LocalAssetReferenceOptions = {
+    role?: AssetReferenceRole;
+    note?: string;
+    metadata?: Record<string, unknown>;
+};
+
 export type AssetReferenceLocation =
     | {
           source: "studio";
@@ -49,6 +60,16 @@ type AssetDeletionSources = {
 
 export function findAssetReferences(assetId: string, sources: AssetReferenceSources): AssetReferenceLocation[] {
     return [...findStudioAssetReferences(assetId, sources.studioSeries), ...findCanvasAssetReferences(assetId, sources.canvasProjects)];
+}
+
+export function createLocalAssetReference(asset: LocalAssetReferenceSource, options: LocalAssetReferenceOptions = {}): AssetRef {
+    return {
+        assetId: asset.id,
+        kind: asset.kind,
+        role: options.role || "reference",
+        ...(options.note ? { note: options.note } : {}),
+        ...(options.metadata ? { metadata: options.metadata } : {}),
+    };
 }
 
 export async function checkAssetDeletion(assetId: string, sources: AssetDeletionSources): Promise<AssetDeletionCheck> {
