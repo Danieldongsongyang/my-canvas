@@ -76,7 +76,7 @@ export function useCanvasGeneration({
             try {
                 const branchParams = { nodeId, prompt, effectivePrompt, sourceNode, generationConfig, generationContext, setPendingChildIds };
                 if (mode === "image") {
-                    await generateCanvasImage(branchParams, { setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, message });
+                    await generateCanvasImage(branchParams, { nodes: nodesRef.current, connections: connectionsRef.current, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, message });
                     return;
                 }
                 if (mode === "video") {
@@ -171,6 +171,7 @@ export function useCanvasGeneration({
                 }
                 await retryCanvasImage({
                     node,
+                    nodes: nodesRef.current,
                     prompt,
                     generationConfig,
                     retryImages: retryReferenceImages || [],

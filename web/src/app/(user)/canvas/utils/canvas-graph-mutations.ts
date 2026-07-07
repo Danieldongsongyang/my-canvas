@@ -43,6 +43,90 @@ export type CanvasUploadedMediaMutationResult = {
     uiState: CanvasUploadUiState;
 };
 
+export type CanvasGenerationUiState = {
+    selectedNodeIds: Set<string>;
+    selectedConnectionId: string | null;
+    dialogNodeId: string | null;
+};
+
+export type CanvasImageGenerationStartInput = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    sourceNodeId: string;
+    sourcePatch: Partial<CanvasNodeData>;
+    generatedNodes: CanvasNodeData[];
+    generatedConnections: CanvasConnection[];
+    dialogNodeId: string;
+};
+
+export type CanvasImageGenerationStartResult = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    uiState: CanvasGenerationUiState;
+};
+
+export type CanvasImageGenerationSuccessInput = {
+    nodes: CanvasNodeData[];
+    rootNodeId: string;
+    targetNodeId: string;
+    width: number;
+    height: number;
+    metadata: CanvasNodeMetadata;
+};
+
+export function applyCanvasImageGenerationStart({ nodes, connections, sourceNodeId, sourcePatch, generatedNodes, generatedConnections, dialogNodeId }: CanvasImageGenerationStartInput): CanvasImageGenerationStartResult {
+    return {
+        nodes: [...nodes.map((node) => (node.id === sourceNodeId ? { ...node, ...sourcePatch, metadata: { ...node.metadata, ...sourcePatch.metadata } } : node)), ...generatedNodes],
+        connections: [...connections, ...generatedConnections],
+        uiState: {
+            selectedNodeIds: new Set([sourceNodeId]),
+            selectedConnectionId: null,
+            dialogNodeId,
+        },
+    };
+}
+
+export function applyCanvasImageGenerationSuccess({ nodes, rootNodeId, targetNodeId, width, height, metadata }: CanvasImageGenerationSuccessInput): CanvasNodeData[] {
+    const root = nodes.find((node) => node.id === rootNodeId);
+
+    return nodes.map((node) => {
+        if (node.id !== targetNodeId && node.id !== rootNodeId) return node;
+
+        const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
+        const resizedNode = {
+            ...node,
+            position: { x: center.x - width / 2, y: center.y - height / 2 },
+            width,
+            height,
+        };
+
+        if (node.id === rootNodeId && (targetNodeId === rootNodeId || !root?.metadata?.primaryImageId)) {
+            return {
+                ...resizedNode,
+                metadata: { ...node.metadata, ...metadata, primaryImageId: targetNodeId },
+            };
+        }
+
+        if (node.id === targetNodeId) {
+            return {
+                ...resizedNode,
+                metadata: { ...node.metadata, ...metadata },
+            };
+        }
+
+        return node;
+    });
+}
+
+export function applyCanvasImageGenerationError(nodes: CanvasNodeData[], nodeId: string, errorDetails: string): CanvasNodeData[] {
+    return nodes.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails } } : node));
+}
+
+export function completeCanvasImageGeneration(nodes: CanvasNodeData[], rootNodeId: string, hasSuccess: boolean): CanvasNodeData[] {
+    if (hasSuccess) return nodes;
+    return nodes.map((node) => (node.id === rootNodeId ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails: "全部图片生成失败" } } : node));
+}
+
 export function applyUploadedMediaToCanvasGraph({ nodes, connections, upload, uiState }: CanvasUploadedMediaMutationInput): CanvasUploadedMediaMutationResult {
     if (upload.mode === "replace") {
         const target = nodes.find((node) => node.id === upload.nodeId);

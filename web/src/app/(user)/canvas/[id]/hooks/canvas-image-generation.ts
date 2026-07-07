@@ -10,9 +10,12 @@ import { fitNodeSize } from "../../utils/canvas-node-size";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "../../types";
 import { NODE_STATUS_ERROR, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS, buildImageGenerationMetadata, imageMetadata } from "../canvas-page-utils";
 import type { CanvasGenerateBranchParams, CanvasGenerationMessage, CanvasGenerationSetters } from "./canvas-generation-types";
+import { generateCanvasTextToImage, retryCanvasGeneratedImage } from "../../services/canvas-generation-orchestration";
 
 type ImageGenerationDeps = Pick<CanvasGenerationSetters, "setNodes" | "setConnections" | "setSelectedNodeIds" | "setSelectedConnectionId" | "setDialogNodeId"> & {
     message: CanvasGenerationMessage;
+    nodes: CanvasNodeData[];
+    connections: Array<{ id: string; fromNodeId: string; toNodeId: string }>;
 };
 
 export async function generateCanvasImage(params: CanvasGenerateBranchParams, deps: ImageGenerationDeps) {
@@ -29,6 +32,34 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
     const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
+
+    if (!isConfigNode && !isImageNode) {
+        const result = await generateCanvasTextToImage({
+            nodes: deps.nodes,
+            connections: deps.connections,
+            sourceNodeId: nodeId,
+            prompt,
+            effectivePrompt,
+            generationConfig,
+            referenceImages,
+            onStart: (state) => {
+                setPendingChildIds(state.pendingNodeIds);
+                setNodes(state.nodes);
+                setConnections(state.connections);
+                setSelectedNodeIds(state.uiState.selectedNodeIds);
+                setSelectedConnectionId(state.uiState.selectedConnectionId);
+                setDialogNodeId(state.uiState.dialogNodeId);
+            },
+        });
+        setNodes(result.nodes);
+        setConnections(result.connections);
+        setSelectedNodeIds(result.uiState.selectedNodeIds);
+        setSelectedConnectionId(result.uiState.selectedConnectionId);
+        setDialogNodeId(result.uiState.dialogNodeId);
+        if (result.hasFailure) message.error(result.hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
+        return;
+    }
+
     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
@@ -173,6 +204,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
 
 export async function retryCanvasImage(params: {
     node: CanvasNodeData;
+    nodes: CanvasNodeData[];
     prompt: string;
     generationConfig: AiConfig;
     retryImages: ReferenceImage[];
@@ -180,25 +212,7 @@ export async function retryCanvasImage(params: {
     savedImageMetadata?: CanvasNodeMetadata;
     setNodes: CanvasGenerationSetters["setNodes"];
 }) {
-    const { node, prompt, generationConfig, retryImages, useReferenceImages, savedImageMetadata, setNodes } = params;
-    const image = useReferenceImages ? await requestEdit(generationConfig, prompt, retryImages).then((items) => items[0]) : await requestGeneration(generationConfig, prompt).then((items) => items[0]);
-    const uploadedImage = await uploadImage(image.dataUrl);
-    const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-    const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
-    const generationMetadata = savedImageMetadata?.generationType
-        ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: savedImageMetadata.count || 1, references: savedImageMetadata.references }
-        : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
-    setNodes((prev) =>
-        prev.map((item) =>
-            item.id === node.id
-                ? {
-                      ...item,
-                      type: CanvasNodeType.Image,
-                      width: imageSize.width,
-                      height: imageSize.height,
-                      metadata: { ...item.metadata, ...imageMetadata(uploadedImage), prompt, ...generationMetadata },
-                  }
-                : item,
-        ),
-    );
+    const { node, nodes, prompt, generationConfig, retryImages, useReferenceImages, savedImageMetadata, setNodes } = params;
+    const nextNodes = await retryCanvasGeneratedImage({ nodes, node, prompt, generationConfig, retryImages, useReferenceImages, savedImageMetadata });
+    setNodes(nextNodes);
 }
