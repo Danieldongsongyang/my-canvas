@@ -3,7 +3,7 @@ import { BookOpen, Clapperboard, Film, Palette, Users } from "lucide-react";
 
 import { selectEffectiveModel, type ModelSelection } from "@/lib/model-selection";
 import type { StudioAssetRef, StudioEpisode, StudioSeries } from "@/services/studio-local";
-import type { AiConfig } from "@/stores/use-config-store";
+import type { AiConfig, ModelCapability } from "@/stores/use-config-store";
 
 export type StudioPipelineStep = {
     id: "script" | "art_direction" | "cast" | "storyboard_r2v" | "assembly";
@@ -110,6 +110,12 @@ const STUDIO_MODEL_LABELS: Record<StudioModelPreferenceKey, string> = {
     videoModel: "视频",
 };
 
+const STUDIO_MODEL_SUMMARY_FIELDS: Array<{ key: StudioModelPreferenceKey; capability: ModelCapability }> = [
+    { key: "textModel", capability: "text" },
+    { key: "imageModel", capability: "image" },
+    { key: "videoModel", capability: "video" },
+];
+
 export const STUDIO_STYLE_PRESETS: StudioStylePreset[] = [
     {
         id: "cinematic-neon-noir",
@@ -160,11 +166,7 @@ export function buildStudioModelPreferencesPatch(input: Record<StudioModelPrefer
 }
 
 export function buildStudioModelSummary(preferences: StudioSeries["modelPreferences"], config: AiConfig, remoteModelsError = ""): StudioModelSummaryItem[] {
-    return [
-        buildStudioModelSummaryItem("textModel", selectEffectiveModel({ config, capability: "text", studioPreferences: preferences, remoteModelsError })),
-        buildStudioModelSummaryItem("imageModel", selectEffectiveModel({ config, capability: "image", studioPreferences: preferences, remoteModelsError })),
-        buildStudioModelSummaryItem("videoModel", selectEffectiveModel({ config, capability: "video", studioPreferences: preferences, remoteModelsError })),
-    ];
+    return STUDIO_MODEL_SUMMARY_FIELDS.map(({ key, capability }) => buildStudioModelSummaryItem(key, selectEffectiveModel({ config, capability, studioPreferences: preferences, remoteModelsError })));
 }
 
 export function buildStudioPipelineSteps(episode: StudioEpisode): StudioPipelineStep[] {

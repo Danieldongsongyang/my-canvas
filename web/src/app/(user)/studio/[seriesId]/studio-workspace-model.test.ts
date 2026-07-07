@@ -11,7 +11,7 @@ import {
     normalizeArtDirectionDraft,
     STUDIO_STYLE_PRESETS,
 } from "./studio-workspace-model";
-import { defaultConfig, resolveConfigWithModels, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, resolveConfigWithModels } from "@/stores/use-config-store";
 import type { StudioEpisode } from "@/services/studio-local";
 
 function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
@@ -55,7 +55,7 @@ describe("studio workspace model", () => {
                 textModel: "gpt-5.5",
                 imageModel: "seedream-4",
                 videoModel: "sora-1",
-            } as AiConfig,
+            },
             ["gpt-5.5", "claude-sonnet-5", "seedream-4", "sora-1", "kling-v3"],
         );
 

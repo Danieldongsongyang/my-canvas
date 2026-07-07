@@ -13,6 +13,13 @@ export type ModelSelection = {
 
 type StudioModelPreferences = StudioSeries["modelPreferences"];
 
+type SelectEffectiveModelInput = {
+    config: AiConfig;
+    capability: ModelCapability;
+    studioPreferences?: StudioModelPreferences;
+    remoteModelsError?: string;
+};
+
 const capabilityLabels: Record<ModelCapability, string> = {
     text: "文本",
     image: "图像",
@@ -20,27 +27,14 @@ const capabilityLabels: Record<ModelCapability, string> = {
     audio: "音频",
 };
 
-export function selectEffectiveModel(input: {
-    config: AiConfig;
-    capability: ModelCapability;
-    studioPreferences?: StudioModelPreferences;
-    remoteModelsError?: string;
-}): ModelSelection {
+export function selectEffectiveModel(input: SelectEffectiveModelInput): ModelSelection {
     const { config, capability, studioPreferences, remoteModelsError = "" } = input;
-    const projectPreference = studioPreferenceForCapability(studioPreferences, capability);
+    const projectModel = studioPreferenceForCapability(studioPreferences, capability).trim();
     const globalModel = globalModelForCapability(config, capability);
-    const availableModels = modelsForCapability(config, capability);
     const channelMode = config.channelMode || "remote";
 
-    const projectModel = projectPreference.trim();
     if (channelMode === "local") {
-        const selected = projectModel || globalModel;
-        return withLocalReadiness(config, {
-            capability,
-            model: selected,
-            source: projectModel ? "project" : selected ? "global" : "missing",
-            reason: selected ? "" : `请先配置可用的${capabilityLabels[capability]}模型。`,
-        });
+        return selectLocalModel(config, capability, projectModel, globalModel);
     }
 
     if (remoteModelsError) {
@@ -53,11 +47,12 @@ export function selectEffectiveModel(input: {
         };
     }
 
+    const availableModels = modelsForCapability(config, capability);
     if (projectModel && availableModels.includes(projectModel)) {
         return { capability, model: projectModel, source: "project", ready: true, reason: "" };
     }
 
-    const fallback = availableModels.includes(globalModel) ? globalModel : availableModels[0] || "";
+    const fallback = selectRemoteFallback(globalModel, availableModels);
     if (fallback) {
         return {
             capability,
@@ -73,28 +68,81 @@ export function selectEffectiveModel(input: {
         model: "",
         source: "missing",
         ready: false,
-        reason: projectModel ? `项目偏好模型 ${projectModel} 当前不可用，且没有可用的${capabilityLabels[capability]}模型。` : `请先配置可用的${capabilityLabels[capability]}模型。`,
+        reason: projectModel ? `项目偏好模型 ${projectModel} 当前不可用，且没有可用的${capabilityLabels[capability]}模型。` : missingModelReason(capability),
     };
+}
+
+function selectLocalModel(config: AiConfig, capability: ModelCapability, projectModel: string, globalModel: string): ModelSelection {
+    const selected = projectModel || globalModel;
+    return withLocalReadiness(config, {
+        capability,
+        model: selected,
+        source: selectionSource(projectModel, selected),
+        reason: selected ? "" : missingModelReason(capability),
+    });
+}
+
+function selectionSource(projectModel: string, selectedModel: string): ModelSelectionSource {
+    if (projectModel) return "project";
+    if (selectedModel) return "global";
+    return "missing";
+}
+
+function selectRemoteFallback(globalModel: string, availableModels: string[]) {
+    if (availableModels.includes(globalModel)) return globalModel;
+    return availableModels[0] || "";
+}
+
+function missingModelReason(capability: ModelCapability) {
+    return `请先配置可用的${capabilityLabels[capability]}模型。`;
 }
 
 function studioPreferenceForCapability(preferences: StudioModelPreferences | undefined, capability: ModelCapability) {
     if (!preferences) return "";
-    if (capability === "text") return preferences.textModel ?? "";
-    if (capability === "image") return preferences.imageModel ?? "";
-    if (capability === "video") return preferences.videoModel ?? "";
-    return "";
+    switch (capability) {
+        case "text":
+            return preferences.textModel ?? "";
+        case "image":
+            return preferences.imageModel ?? "";
+        case "video":
+            return preferences.videoModel ?? "";
+        case "audio":
+        default:
+            return "";
+    }
 }
 
 function globalModelForCapability(config: AiConfig, capability: ModelCapability) {
-    if (capability === "text") return (config.textModel || config.model).trim();
-    if (capability === "image") return config.imageModel.trim();
-    if (capability === "video") return config.videoModel.trim();
-    return config.audioModel.trim();
+    switch (capability) {
+        case "text":
+            return (config.textModel || config.model).trim();
+        case "image":
+            return config.imageModel.trim();
+        case "video":
+            return config.videoModel.trim();
+        case "audio":
+        default:
+            return config.audioModel.trim();
+    }
 }
 
 function modelsForCapability(config: AiConfig, capability: ModelCapability) {
-    const models = capability === "text" ? config.textModels : capability === "image" ? config.imageModels : capability === "video" ? config.videoModels : config.audioModels;
+    const models = modelListForCapability(config, capability);
     return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
+}
+
+function modelListForCapability(config: AiConfig, capability: ModelCapability) {
+    switch (capability) {
+        case "text":
+            return config.textModels;
+        case "image":
+            return config.imageModels;
+        case "video":
+            return config.videoModels;
+        case "audio":
+        default:
+            return config.audioModels;
+    }
 }
 
 function withLocalReadiness(config: AiConfig, selection: Omit<ModelSelection, "ready">): ModelSelection {

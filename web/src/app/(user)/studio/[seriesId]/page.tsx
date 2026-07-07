@@ -99,6 +99,27 @@ export default function StudioWorkspacePage() {
         setNegativePrompt(draft?.negativePrompt ?? preset.negativePrompt);
     };
 
+    const ensureTextModelReady = () => {
+        if (textModelSelection.ready) return true;
+        openConfigDialog(true);
+        message.warning(textModelSelection.reason || "请先配置可用的文本模型");
+        return false;
+    };
+
+    const ensureImageModelReady = () => {
+        if (imageModelSelection.ready) return true;
+        openConfigDialog(true);
+        message.warning(imageModelSelection.reason || "请先配置可用的图像模型");
+        return false;
+    };
+
+    const ensureArtDirectionReady = (currentEpisode: StudioEpisode) => {
+        if (readArtDirectionDraft(currentEpisode)) return true;
+        setActiveStep("art_direction");
+        message.warning("请先完成 Style 定调");
+        return false;
+    };
+
     useEffect(() => {
         async function loadSeries() {
             const nextSeries = await studioRepository.getSeries(params.seriesId);
@@ -164,11 +185,7 @@ export default function StudioWorkspacePage() {
             message.warning("请先输入剧本内容");
             return;
         }
-        if (!textModelSelection.ready) {
-            openConfigDialog(true);
-            message.warning(textModelSelection.reason || "请先配置可用的文本模型");
-            return;
-        }
+        if (!ensureTextModelReady()) return;
 
         setParsing(true);
         setParseError("");
@@ -178,7 +195,7 @@ export default function StudioWorkspacePage() {
                 seriesId: series.id,
                 episodeId: episode.id,
                 script: normalizedScript,
-                config: { ...config, model: textModelSelection.model, textModel: textModelSelection.model },
+                config: withTextGenerationModel(config, textModelSelection.model),
             });
             setSeries(result.series);
             setScript(result.episode.script);
@@ -390,16 +407,8 @@ export default function StudioWorkspacePage() {
         if (!series || !episode) return;
         const shot = episode.shots.find((item) => item.id === shotId);
         if (!shot) return;
-        if (!readArtDirectionDraft(episode)) {
-            setActiveStep("art_direction");
-            message.warning("请先完成 Style 定调");
-            return;
-        }
-        if (!imageModelSelection.ready) {
-            openConfigDialog(true);
-            message.warning(imageModelSelection.reason || "请先配置可用的图像模型");
-            return;
-        }
+        if (!ensureArtDirectionReady(episode)) return;
+        if (!ensureImageModelReady()) return;
         setGeneratingShot(true);
         try {
             let currentEpisode = episode;
@@ -432,7 +441,7 @@ export default function StudioWorkspacePage() {
                 seriesId: series.id,
                 episodeId: episode.id,
                 shotId,
-                config: { ...config, model: imageModelSelection.model, imageModel: imageModelSelection.model },
+                config: withImageGenerationModel(config, imageModelSelection.model),
                 assets,
                 count,
                 allowNoReferences,
@@ -484,23 +493,15 @@ export default function StudioWorkspacePage() {
 
     const runStoryboardBatchGeneration = async (target: Parameters<typeof generateMissingStoryboardShotImages>[0]["target"]) => {
         if (!series || !episode) return;
-        if (!readArtDirectionDraft(episode)) {
-            setActiveStep("art_direction");
-            message.warning("请先完成 Style 定调");
-            return;
-        }
-        if (!imageModelSelection.ready) {
-            openConfigDialog(true);
-            message.warning(imageModelSelection.reason || "请先配置可用的图像模型");
-            return;
-        }
+        if (!ensureArtDirectionReady(episode)) return;
+        if (!ensureImageModelReady()) return;
         setGeneratingStoryboardBatch(true);
         try {
             const result = await generateMissingStoryboardShotImages({
                 repository: studioRepository,
                 seriesId: series.id,
                 episodeId: episode.id,
-                config: { ...config, model: imageModelSelection.model, imageModel: imageModelSelection.model },
+                config: withImageGenerationModel(config, imageModelSelection.model),
                 assets,
                 target,
                 count: 1,
@@ -526,23 +527,15 @@ export default function StudioWorkspacePage() {
 
     const runCastGeneration = async ({ target, count }: { target: Parameters<typeof generateCastReferences>[0]["target"]; count: 1 | 2 | 4 }) => {
         if (!series || !episode) return;
-        if (!readArtDirectionDraft(episode)) {
-            setActiveStep("art_direction");
-            message.warning("请先完成 Style 定调");
-            return;
-        }
-        if (!imageModelSelection.ready) {
-            openConfigDialog(true);
-            message.warning(imageModelSelection.reason || "请先配置可用的图像模型");
-            return;
-        }
+        if (!ensureArtDirectionReady(episode)) return;
+        if (!ensureImageModelReady()) return;
         setGeneratingCast(true);
         try {
             const result = await generateCastReferences({
                 repository: studioRepository,
                 seriesId: series.id,
                 episodeId: episode.id,
-                config: { ...config, model: imageModelSelection.model, imageModel: imageModelSelection.model },
+                config: withImageGenerationModel(config, imageModelSelection.model),
                 target,
                 count,
                 addAsset,
@@ -733,6 +726,14 @@ const studioSecondaryButtonClass =
     "!inline-flex !items-center !justify-center !rounded-full !border-[#34d8c4]/40 !bg-[#34d8c4]/10 !font-semibold !text-[#34d8c4] !shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:!border-[#34d8c4]/60 hover:!bg-[#34d8c4]/20 hover:!text-[#f2ede4] disabled:!opacity-50";
 
 const emptyStudioModelPreferences: StudioSeries["modelPreferences"] = {};
+
+function withTextGenerationModel(config: AiConfig, model: string): AiConfig {
+    return { ...config, model, textModel: model };
+}
+
+function withImageGenerationModel(config: AiConfig, model: string): AiConfig {
+    return { ...config, model, imageModel: model };
+}
 
 function PipelineRail({
     series,
