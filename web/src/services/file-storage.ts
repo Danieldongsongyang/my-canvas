@@ -51,6 +51,14 @@ export async function deleteStoredMedia(keys: Iterable<string>) {
     );
 }
 
+export async function listStoredMediaKeys() {
+    const keys: string[] = [];
+    await store.iterate((_value, key) => {
+        if (key.includes(":")) keys.push(key);
+    });
+    return keys;
+}
+
 export async function cleanupUnusedMedia(usedData: unknown) {
     const usedKeys = collectMediaStorageKeys(usedData);
     const unused: string[] = [];

@@ -7,9 +7,9 @@ import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { checkAssetDeletion, type AssetDeletionCheck } from "@/services/asset-references";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { studioRepository } from "@/services/studio-local";
-import { cleanupUnusedCanvasImageMedia } from "@/app/(user)/canvas/services/canvas-node-media";
+import { cleanupUnusedCanvasNodeMedia } from "@/app/(user)/canvas/services/canvas-node-media";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -98,8 +98,7 @@ export const useAssetStore = create<AssetStore>()(
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {
                     const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
-                    await cleanupUnusedCanvasImageMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
-                    await cleanupUnusedMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
+                    await cleanupUnusedCanvasNodeMedia({ assets: get().assets, projects: useCanvasStore.getState().projects, extra });
                 }, 0);
             },
         }),
