@@ -50,7 +50,8 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 const DEFAULT_CODEX_MODEL = process.env.SANDCASTLE_CODEX_MODEL ?? "gpt-5.4";
-const IMPLEMENT_CODEX_MODEL = process.env.SANDCASTLE_IMPLEMENT_MODEL ?? DEFAULT_CODEX_MODEL;
+const IMPLEMENT_CODEX_MODEL = process.env.SANDCASTLE_IMPLEMENT_MODEL ?? "gpt-5.5";
+const IMPLEMENT_CODEX_EFFORT = "medium";
 const REVIEW_CODEX_MODEL = process.env.SANDCASTLE_REVIEW_MODEL ?? "gpt-5.5";
 const REVIEW_CODEX_EFFORT = "xhigh";
 const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -164,7 +165,19 @@ const codexAgent = (model = DEFAULT_CODEX_MODEL, effort?: CodexEffort) =>
 // Hooks run inside the sandbox before the agent starts each iteration.
 // The frontend package lives in web/, so install dependencies there.
 const hooks = {
-    sandbox: { onSandboxReady: [{ command: "cd web && npm install --legacy-peer-deps --no-package-lock" }] },
+    sandbox: {
+        onSandboxReady: [
+            {
+                command:
+                    "cd web && if [ -d node_modules ]; then echo 'web/node_modules already present; skipping npm install'; else npm install --legacy-peer-deps --no-package-lock --prefer-offline --no-audit --no-fund; fi",
+                timeoutMs: 900_000,
+            },
+        ],
+    },
+};
+
+const timeouts = {
+    copyToWorktreeMs: 600_000,
 };
 
 // Copy node_modules from the host into the worktree before each sandbox
@@ -237,6 +250,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                 sandbox: docker(),
                 hooks,
                 copyToWorktree,
+                timeouts,
             });
 
             try {
@@ -244,7 +258,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                 const implement = await sandbox.run({
                     name: "implementer",
                     maxIterations: 100,
-                    agent: codexAgent(IMPLEMENT_CODEX_MODEL),
+                    agent: codexAgent(IMPLEMENT_CODEX_MODEL, IMPLEMENT_CODEX_EFFORT),
                     promptFile: "./.sandcastle/implement-prompt.md",
                     promptArgs: {
                         TASK_ID: issue.id,

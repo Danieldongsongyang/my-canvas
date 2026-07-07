@@ -591,9 +591,6 @@ function EmptyImageContent({ node, theme, isSelected, isBatchRoot, batchCount, b
                 </button>
             ) : null}
             <div className="space-y-3 pl-7">
-                <div className="text-sm font-semibold" style={{ color: theme.node.placeholder }}>
-                    尝试：
-                </div>
                 <div className="space-y-2">
                     <ImageWorkflowActionItem icon={<Images className="size-4" />} label="图生图" theme={theme} onClick={() => onImageWorkflow?.(node, "image-to-image")} />
                     <ImageWorkflowActionItem icon={<Video className="size-4" />} label="图生视频" theme={theme} onClick={() => onImageWorkflow?.(node, "image-to-video")} />
