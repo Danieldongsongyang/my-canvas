@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 
 import { uploadMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 import type { AiConfig } from "@/stores/use-config-store";
 
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../../constants";
@@ -335,7 +336,7 @@ function createWorkflowTaskNode(type: CanvasNodeType.Image | CanvasNodeType.Vide
                   model: config.imageModel || config.model,
                   size: config.size,
                   quality: config.quality,
-                  count: getGenerationCount(config.canvasImageCount || config.count),
+                  count: normalizeImageGenerationCount(config.canvasImageCount || config.count, config.imageModel || config.model),
               };
 
     return {
@@ -376,8 +377,4 @@ function workflowTitle(workflow: CanvasImageWorkflowAction, fallback: string) {
     if (workflow === "image-background") return "图片换背景";
     if (workflow === "first-frame-video") return "首帧图生视频";
     return fallback;
-}
-
-function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }

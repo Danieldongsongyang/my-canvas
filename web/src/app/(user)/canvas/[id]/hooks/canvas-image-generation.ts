@@ -4,6 +4,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 
 import { NODE_DEFAULT_SIZE } from "../../constants";
 import { fitNodeSize } from "../../utils/canvas-node-size";
@@ -21,7 +22,7 @@ type ImageGenerationDeps = Pick<CanvasGenerationSetters, "setNodes" | "setConnec
 export async function generateCanvasImage(params: CanvasGenerateBranchParams, deps: ImageGenerationDeps) {
     const { nodeId, prompt, effectivePrompt, sourceNode, generationConfig, generationContext, setPendingChildIds } = params;
     const { setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, message } = deps;
-    const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(generationConfig.count)) || 1)));
+    const count = normalizeImageGenerationCount(generationConfig.count, generationConfig.model || generationConfig.imageModel);
     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;

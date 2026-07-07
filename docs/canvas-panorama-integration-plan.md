@@ -1,145 +1,137 @@
-# 画布全景图能力集成流程
+# 画布全景图能力集成计划
 
-本文使用 `codebase-design` 的词汇重新编排画布全景图能力的实施流程。目标不是先堆功能，而是先找到合适的 **Seam**，把全景查看、全景生成策略、节点状态传播收进少量有深度的 **Module** 里，让调用方只学习很小的 **Interface**。
+本文使用 `codebase-design` 的词汇描述全景图能力如何接入当前代码库。重点是把“当前可落地的最小闭环”和“后续继续深化生成编排”分开：第一版先让用户能生成、标记、查看全景图；第二阶段再把仍散在 hook 里的生成 implementation 收进更深的 **Module**。
 
-调研日期：2026-07-06。
+调研日期：2026-07-07。
 
-## 1. 目标
+参考：
 
-在当前 `/canvas` 中支持这类工作流：
+- 架构评审文件：`file:///private/var/folders/dl/9mdbbdx13yl20k4mh9qgr4f00000gn/T/architecture-review-20260706-203711.html`
+- Photo Sphere Viewer 文档：<https://photo-sphere-viewer.js.org/guide/>
+
+## 1. 结论
+
+和当前代码库的契合度判断：
+
+- 数据模型契合：`CanvasNodeMetadata.panorama?: boolean` 已存在。
+- 配置入口契合：生成配置面板已经有“全景图”开关。
+- 图片查看入口契合：图片详情弹窗现在只有普通 `<img>`，适合在这里接全景 viewer。
+- 图片节点入口契合：节点内现在只渲染缩略图，适合只加“全景”标识，不启用 WebGL。
+- 媒体存储 **Module** 契合：`canvas-node-media.ts` 已经负责媒体 hydrate / upload / cleanup，全景策略不该放进去。
+- 生成编排部分半契合：`canvas-generation-orchestration.ts` 已经承接文本生图和重试，但配置节点、空图片节点、已有图片节点生图仍在 `canvas-image-generation.ts` 里直接实现。
+
+因此第一版不要把“全景功能闭环”和“生成编排完全收拢”绑死。正确顺序是：
+
+1. 新增一个小而深的全景策略 **Module**。
+2. 在当前生成 hook 和已有 generation orchestration 两处接入策略，先完成闭环。
+3. 新增 viewer **Module**，只在图片详情弹窗里使用。
+4. 给缩略图和工具栏补 UI 状态。
+5. 第二阶段再把配置节点 / 图片节点生图分支收进 `canvas-generation-orchestration.ts`。
+
+本计划已经确认以下执行决策：
+
+- 依赖管理使用 Bun。安装 Photo Sphere Viewer 时使用 `bun add @photo-sphere-viewer/core`，不要引入 npm / pnpm / yarn 锁文件。
+- 全景策略 **Module** 固定放在 `web/src/app/(user)/canvas/services/canvas-panorama-policy.ts`。
+- 第一版接受在 `canvas-image-generation.ts` 里接入全景策略，不把生成编排大迁移作为 blocker。
+- 图片工具栏配置 key 直接从 `canvas-image-quick-tools-v7` 升到 `canvas-image-quick-tools-v8`，让默认工具集包含“全景”。
+- 替换图片时保留原节点的 `panorama` 意图；用户可通过工具栏切回平面。
+- `AiConfig.size = "2:1"` 由后端配合支持，前端计划不再把该契约作为待确认前提。
+- 第一版不新增保存原始 prompt 的 metadata 字段；生成结果的 `metadata.prompt` 使用最终请求 prompt，确保重试不会丢失全景约束。
+
+## 2. 第一版目标
+
+用户工作流：
 
 ```text
-用户生成或上传一张 2:1 等距矩形全景图
+用户生成、上传或导入一张 2:1 等距矩形全景图
         ↓
-图片节点标记为全景图
+图片节点用 metadata.panorama 标记为全景图
         ↓
-节点仍按普通图片参与画布排布、连线、下载、保存素材
+节点仍按普通图片参与画布排布、批量生成、连线、下载、保存素材
         ↓
 打开图片详情时进入可拖拽、可缩放的 360 全景查看
 ```
 
-第一版只做稳定闭环：
+第一版要做：
 
-- 复用现有 `CanvasNodeType.Image`，不新增全景节点类型。
-- 复用现有 `metadata.panorama?: boolean` 字段。
-- 图片节点缩略图仍按普通图片显示。
-- 图片详情弹窗中根据 `metadata.panorama` 切换普通图片查看或全景查看。
+- 复用 `CanvasNodeType.Image`，不新增全景节点类型。
+- 复用 `CanvasNodeMetadata.panorama?: boolean`，不新增 projection / yaw / pitch / fov 字段。
+- 生成配置里的“全景图”开关影响生成请求和生成结果。
+- 全景生成请求使用 2:1 尺寸，并给 prompt 增加 equirectangular / seamless wrap 约束。
+- 图片详情弹窗根据 `metadata.panorama` 切换普通图片查看或全景查看。
+- 图片节点缩略图仍渲染普通 `<img>`，只增加低干扰“全景”标识。
 - 图片工具栏提供“全景 / 平面”切换。
-- 生成配置中的“全景图”开关要传播到生成结果。
-- 打开“全景图”生成时，生成策略默认使用 2:1 尺寸，并给 prompt 追加全景约束。
 
 第一版不做：
 
-- 不做画布内实时 WebGL 全景预览。
-- 不做多场景虚拟漫游。
-- 不做热点、地图、楼层切换。
-- 不做 cubemap 或切片格式。
+- 不在画布节点内初始化 WebGL 全景预览。
+- 不做多场景 tour、热点、地图、楼层切换。
+- 不做 cubemap、tiles、360 视频。
 - 不自研 WebGL 球面投影。
-- 不把 Photo Sphere Viewer 抽象成可插拔 provider。当前只有一个生产实现，先不要制造假 seam。
+- 不抽 `PanoramaProvider` / `PanoramaRuntime`。当前只有 Photo Sphere Viewer 一个生产 **Adapter**，这个 **Seam** 不真实。
 
-## 2. 技术原理
+## 3. 当前代码事实
 
-RHTV 或其他无线画布里的“720 度全景”通常是产品说法。工程上最常见的是：
+### 已存在的数据和入口
 
-1. 生成一张 **equirectangular panorama**，即等距矩形全景图。
-2. 图片通常是 2:1 比例，例如 `2048x1024`、`4096x2048`。
-3. 前端用 WebGL 把图片贴到球体内侧。
-4. 相机放在球体中心。
-5. 拖拽时改变相机的 yaw、pitch、fov，看起来就能前后左右环绕。
+- `web/src/app/(user)/canvas/types.ts`
+  - `CanvasNodeMetadata` 已有 `panorama?: boolean`。
+- `web/src/app/(user)/canvas/components/canvas-node-prompt-panel.tsx`
+  - 第 110 行左右已经有“全景图”开关，直接写 `metadata.panorama`。
+- `web/src/app/(user)/canvas/[id]/canvas-client-page.tsx`
+  - `setBatchPrimary` 目前只把 child 的 `content`、`naturalWidth`、`naturalHeight`、`freeResize` 写回 root，尚未传播 `panorama`。
+  - 图片详情弹窗目前标题固定为“图片详情”，内容固定为普通 `<img>` 缩放。
+- `web/src/app/(user)/canvas/components/canvas-node.tsx`
+  - `ImageContent` 当前只渲染普通 `<img>` 和底部“以图生图 / 图生视频”快捷操作。
+- `web/src/app/(user)/canvas/components/canvas-image-toolbar-tools.tsx`
+  - 图片工具栏没有 `panorama` 工具。
+  - `IMAGE_QUICK_TOOLS_STORAGE_KEY` 当前是 `canvas-image-quick-tools-v7`；第一版新增默认工具时直接 bump 到 `canvas-image-quick-tools-v8`。
 
-因此功能分为两个问题：
+### 已存在的深 Module
 
-- 查看：把一张 equirectangular 图片投影到球面内侧。
-- 生成：让 AI 更可能产出 2:1、左右可无缝衔接的 equirectangular 图片。
+- `web/src/app/(user)/canvas/services/canvas-node-media.ts`
+  - 已负责图片 / 视频 / 音频上传、hydrate、cleanup、storage key 收集。
+  - 它可以保留 `metadata.panorama`，但不应理解 2:1、equirectangular 或 viewer。
+- `web/src/app/(user)/canvas/utils/canvas-graph-mutations.ts`
+  - 已负责上传媒体入图、生成开始、生成成功、生成失败等图结构变更。
+  - `cleanUploadedMediaMetadata` 当前不会清理 `panorama`，所以替换一张图片时会继承旧节点的全景状态，除非显式改变。
+- `web/src/app/(user)/canvas/services/canvas-generation-orchestration.ts`
+  - 已负责文本生图和重试。
+  - 通过 `CanvasImageGenerationRequester` 和 `CanvasNodeMediaAdapter` 提供可测试 **Seam**。
 
-这两个问题不要混成一个大实现。查看能力和生成策略应放在不同 **Module** 中。
+### 仍散在 hook 里的 implementation
 
-## 3. 开源方案选择
+`web/src/app/(user)/canvas/[id]/hooks/canvas-image-generation.ts` 中仍直接实现：
 
-推荐第一版使用 Photo Sphere Viewer：
+- 配置节点生图。
+- 空图片节点生图。
+- 已有图片节点以图生图。
+- root / child 节点创建。
+- batch connections 创建。
+- `requestGeneration` / `requestEdit` 调用。
+- `uploadImage` 调用。
+- success / error metadata 写入。
 
-- 项目地址：https://github.com/mistic100/Photo-Sphere-Viewer
-- 文档：https://photo-sphere-viewer.js.org/
-- npm：https://www.npmjs.com/package/@photo-sphere-viewer/core
-- 协议：MIT
-- 能力：支持 equirectangular panorama、cubemap、拖拽、缩放、触摸、移动端交互。
+所以第一版全景接入必须照顾这个现实：策略 **Module** 要能同时被当前 hook 和已有 generation orchestration 调用。
 
-备选方案：
+## 4. Module 1：Canvas Panorama Policy Module
 
-- Pannellum：https://pannellum.org/
-  - 很轻，适合 iframe 或简单页面嵌入。
-  - 对当前 React / Next 深度集成不如 Photo Sphere Viewer 顺手。
-- Marzipano：https://www.marzipano.net/
-  - 适合虚拟漫游、多场景、热点、超大图。
-  - 第一版只是图片节点全景查看，用它偏重。
-- egjs-view360：https://naver.github.io/egjs-view360/
-  - 适合后续 360 视频、VR、更多投影格式。
-  - 当前最小切片不需要。
+### Seam
 
-选择原则：
-
-- 不自研复杂标准实现。
-- 优先成熟开源库。
-- 先把第三方库藏在一个小 **Interface** 后面，不让调用方知道 Photo Sphere Viewer 的生命周期、CSS、销毁、事件隔离细节。
-
-## 4. 当前代码里的现成入口
-
-当前项目已经有一半地基：
-
-- 数据模型已有 `metadata.panorama?: boolean`：
-  - `web/src/app/(user)/canvas/types.ts`
-- 生成配置面板已有“全景图”开关：
-  - `web/src/app/(user)/canvas/components/canvas-node-prompt-panel.tsx`
-- 图片节点目前只渲染普通 `<img>`：
-  - `web/src/app/(user)/canvas/components/canvas-node.tsx`
-- 图片详情弹窗目前也只渲染普通 `<img>`：
-  - `web/src/app/(user)/canvas/[id]/canvas-client-page.tsx`
-- 图片生成链路目前没有把 `panorama` 写入生成结果：
-  - `web/src/app/(user)/canvas/[id]/hooks/canvas-image-generation.ts`
-
-因此正确方向是：深化现有 Image 节点能力，而不是新增一套全景节点系统。
-
-## 5. 推荐模块图
+新增：
 
 ```text
-Canvas Panorama
-├── Canvas Panorama Policy Module
-│   ├── 判断节点是否是全景图
-│   ├── 构造全景生成 prompt
-│   ├── 构造全景生成 config patch
-│   └── 给生成结果写入全景 metadata
-├── Canvas Panorama Viewer Module
-│   ├── 初始化 Photo Sphere Viewer
-│   ├── 处理销毁
-│   ├── 隔离 pointer / wheel 事件
-│   ├── 隐藏第三方 CSS 和 WebGL 生命周期
-│   └── 显示错误和加载状态
-└── Canvas Image Node Integration
-    ├── 图片详情弹窗选择普通查看或全景查看
-    ├── 图片工具栏切换全景状态
-    └── 图片生成结果继承全景状态
+web/src/app/(user)/canvas/services/canvas-panorama-policy.ts
+web/src/app/(user)/canvas/services/canvas-panorama-policy.test.ts
 ```
 
-这里的 `Canvas Panorama` 是一个产品能力簇，但实施时不要做成一个巨大文件。真正要落地的是两个有清晰 **Interface** 的 **Module**：
+这是纯计算 **Module**。它不依赖 React，不依赖 Photo Sphere Viewer，不读写 store，不请求后端。
 
-- `Canvas Panorama Policy Module`
-- `Canvas Panorama Viewer Module`
+固定放在 `services/` 的理由：当前跨页面、跨 hook 的画布能力已经放在 `services/`，例如 `canvas-node-media.ts` 和 `canvas-generation-orchestration.ts`。全景策略会被生成编排、当前生成 hook、图片详情和工具栏共同使用，不是页面私有工具函数；规则不要散在 UI 文件里。
 
-## 6. Module 1：Canvas Panorama Policy Module
+### Interface
 
-### 6.1 Seam
-
-建议放在：
-
-```text
-web/src/app/(user)/canvas/utils/canvas-panorama.ts
-```
-
-这是一个纯计算 **Module**。它不依赖 React、不依赖 Photo Sphere Viewer、不读写 store。
-
-### 6.2 Interface
-
-建议第一版只暴露少量函数：
+第一版只暴露这些函数：
 
 ```ts
 export function isPanoramaNode(node: CanvasNodeData | null | undefined): boolean;
@@ -148,29 +140,29 @@ export function buildPanoramaPrompt(prompt: string): string;
 
 export function buildPanoramaGenerationConfig(config: AiConfig): AiConfig;
 
-export function applyPanoramaMetadata<T extends CanvasNodeMetadata>(
-    metadata: T,
+export function applyPanoramaMetadata(
+    metadata: CanvasNodeMetadata | undefined,
     enabled: boolean,
-): T;
+): CanvasNodeMetadata;
 ```
 
-这个 **Interface** 的调用方只需要知道：
+调用方需要知道：
 
-- 给一个 node，能判断是不是全景图。
+- 给一个 node，能判断它是否按全景图处理。
 - 给一个 prompt，能得到适合全景生成的 prompt。
-- 给一个生成 config，能得到适合全景图的 config。
-- 给一段 metadata，能把全景状态写进去。
+- 给一个生成 config，能得到 2:1 全景生成 config。
+- 给一段 metadata，能得到写入或关闭 `panorama` 后的新 metadata。
 
 调用方不需要知道：
 
-- 2:1 尺寸具体怎么选。
+- 2:1 尺寸字符串目前怎么表达。
 - prompt 追加哪些英文约束。
-- 未来是否要加入 projection 类型。
-- ratio 校验阈值是多少。
+- 如何避免重复追加全景词。
+- 未来是否加入 projection、ratio readiness 或模型专用策略。
 
-### 6.3 Implementation
+### Implementation
 
-第一版 Implementation 规则：
+规则：
 
 ```ts
 const PANORAMA_SIZE = "2:1";
@@ -184,65 +176,64 @@ const PANORAMA_PROMPT_SUFFIX = [
 ].join(", ");
 ```
 
-`buildPanoramaPrompt(prompt)` 的行为：
+`buildPanoramaPrompt(prompt)`：
 
-- 如果 prompt 为空，返回空字符串。
-- 如果 prompt 已经包含明显的 `equirectangular` 或 `360 panorama`，不要重复追加一大段。
-- 否则追加全景约束。
+- `prompt.trim()` 为空时返回空字符串。
+- 已包含 `equirectangular`、`360 panorama`、`360-degree panorama` 时不重复追加。
+- 否则在原 prompt 后追加全景约束。
 
-`buildPanoramaGenerationConfig(config)` 的行为：
+`buildPanoramaGenerationConfig(config)`：
 
 - 返回新对象，不修改原对象。
 - 强制 `size: "2:1"`。
-- 保留 model、quality、count、systemPrompt、channelMode 等原设置。
+- 保留 `model`、`quality`、`count`、`systemPrompt`、`channelMode` 等其他字段。
+- 后端会配合接受 `AiConfig.size = "2:1"`；前端不需要在第一版实现尺寸 fallback。
 
-`applyPanoramaMetadata(metadata, enabled)` 的行为：
+`applyPanoramaMetadata(metadata, enabled)`：
 
-- `enabled === true` 时写入 `panorama: true`。
-- `enabled === false` 时可以删除或写入 `panorama: false`，建议写入 `false`，方便持久化和调试。
+- `enabled === true` 时返回 `{ ...metadata, panorama: true }`。
+- `enabled === false` 时返回 `{ ...metadata, panorama: false }`。
 
-### 6.4 Depth
+### 测试
 
-这个 **Module** 的深度来自：
-
-- 调用方不用重复写 prompt suffix。
-- 调用方不用重复决定 2:1 尺寸。
-- 调用方不用关心未来是否加入 `panoramaProjection`。
-- 测试可以直接穿过这个 **Interface** 覆盖生成策略。
-
-### 6.5 测试
-
-建议新增：
-
-```text
-web/src/app/(user)/canvas/utils/canvas-panorama.test.ts
-```
-
-测试只测 **Interface**：
+新增 `canvas-panorama-policy.test.ts`，只测 **Interface**：
 
 - `isPanoramaNode` 对空节点、普通图片、全景图片的判断。
 - `buildPanoramaPrompt` 会追加全景约束。
 - `buildPanoramaPrompt` 不重复追加全景约束。
-- `buildPanoramaGenerationConfig` 返回 `size: "2:1"` 且不修改原对象。
-- `applyPanoramaMetadata` 正确写入或关闭全景状态。
+- `buildPanoramaGenerationConfig` 返回 2:1 且不修改原对象。
+- `applyPanoramaMetadata` 正确写入 true / false。
 
-不要测试内部字符串拼接细节，除非该字符串是外部可见行为。
+不要测试内部字符串拼接顺序，除非该字符串成为外部可见行为。
 
-## 7. Module 2：Canvas Panorama Viewer Module
+## 5. Module 2：Canvas Panorama Viewer Module
 
-### 7.1 Seam
+### Seam
 
-建议放在：
+新增：
 
 ```text
 web/src/app/(user)/canvas/components/canvas-panorama-viewer.tsx
 ```
 
-这是全景查看的外部 **Seam**。Photo Sphere Viewer 只应该出现在这个文件内。
+这是 Photo Sphere Viewer 的外部 **Seam**。第三方库只应该出现在这个文件内。
 
-### 7.2 Interface
+### 依赖
 
-建议第一版 **Interface**：
+当前 `web/package.json` 还没有 `@photo-sphere-viewer/core`。项目使用 Bun 锁文件，第一版需要这样安装：
+
+```bash
+cd /Users/a1/Desktop/my-canvas/web
+bun add @photo-sphere-viewer/core
+```
+
+不要使用 `npm install`、`pnpm add` 或 `yarn add`，避免引入新的锁文件。
+
+Photo Sphere Viewer 文档说明它支持 equirectangular panorama，其他格式通过 adapters 支持；viewer 容器需要明确尺寸。
+
+### Interface
+
+第一版 **Interface**：
 
 ```tsx
 type CanvasPanoramaViewerProps = {
@@ -258,140 +249,222 @@ export function CanvasPanoramaViewer(props: CanvasPanoramaViewerProps) {}
 
 - 传 `src`。
 - 传可选 `title`。
-- 给它一个尺寸容器。
+- 给它一个稳定尺寸容器。
 
 调用方不需要知道：
 
-- Photo Sphere Viewer 怎么创建。
-- Photo Sphere Viewer 怎么销毁。
-- CSS 在哪里引入。
-- 哪些事件需要 stopPropagation。
-- WebGL 初始化失败如何显示。
-- 容器尺寸变化怎么刷新。
+- Photo Sphere Viewer 如何创建。
+- Photo Sphere Viewer 如何销毁。
+- CSS 如何引入。
+- 哪些事件需要阻止冒泡。
+- WebGL 初始化失败如何展示。
+- `src` 变化时如何更新 viewer。
 
-### 7.3 Implementation
+### Implementation
 
-第一版 Implementation 要处理：
+第一版 implementation 要处理：
 
-- `useEffect` 中初始化 viewer。
-- `useEffect` cleanup 中销毁 viewer。
+- 文件顶部使用 `"use client"`。
+- `useEffect` 中初始化 `Viewer`。
+- cleanup 中调用 `destroy()`。
 - `src` 变化时重建或更新 panorama。
 - 外层加 `data-canvas-no-zoom`。
 - 阻止 `wheel`、`pointerdown`、`mousedown`、`dblclick` 冒泡，避免和无限画布缩放、拖拽、双击冲突。
-- 容器最小尺寸稳定，避免初始化时容器为 0 导致黑屏。
+- 容器设置稳定宽高，避免初始化时宽高为 0。
 - 初始化失败时显示中文错误文案。
 
-第三方 CSS 建议按 Next 规则集中引入：
+第三方 CSS：
 
-- 若 Next 允许在该 client 文件中引入第三方 CSS，可直接引入。
-- 若构建报全局 CSS 限制，则在 `web/src/app/globals.css` 或应用根部统一引入。全局 CSS 这里只放第三方库必要样式，不放页面私有样式。
+- 优先测试是否可在该 client 文件中引入 `@photo-sphere-viewer/core/index.css`。
+- 如果 Next 构建报全局 CSS 限制，就在 `web/src/app/globals.css` 或应用根部统一引入。全局 CSS 这里只放第三方库必要样式，不放页面私有样式。
 
-### 7.4 是否需要 Adapter
+### 不新增 Provider Seam
 
-第一版不建议定义 `PanoramaRuntime`、`PanoramaProvider` 之类的外部 **Seam**。
+第一版不要定义：
+
+```ts
+type PanoramaRuntime = ...
+type PanoramaProvider = ...
+```
 
 原因：
 
-- 当前只有 Photo Sphere Viewer 一个生产实现。
+- 当前只有 Photo Sphere Viewer 一个生产 **Adapter**。
 - 没有 Pannellum / Marzipano 的第二个 **Adapter**。
-- 按 `codebase-design` 原则，一个 **Adapter** 意味着 seam 只是想象出来的。
+- 删除 provider 后复杂度不会回到多个调用方，只会少一层浅转发。
 
-可以接受的做法：
+## 6. 第一版生成链路接入：最小闭环
 
-- 在 `CanvasPanoramaViewer` 内部把 Photo Sphere Viewer 当作内部实现细节。
-- 测试时如果需要，mock dynamic import 或只测纯策略 **Module**。
-- 等未来真的要支持 Pannellum 或 Marzipano，再抽出 `PanoramaRuntime` seam。
+这一步不要先强迫完成 `canvas-generation-orchestration.ts` 的大迁移。当前更稳妥的做法是：新增 policy **Module** 后，在已有两条路径分别接入。
 
-## 8. 集成点 1：图片详情弹窗
+### 6.1 文本生图路径
 
-### 8.1 当前入口
+当前文本生图已经走：
 
-文件：
+```text
+canvas-image-generation.ts
+  -> generateCanvasTextToImage(...)
+  -> canvas-generation-orchestration.ts
+```
+
+执行方案：在 `generateCanvasTextToImage` 内接入全景策略。
+
+- `sourceNode` 已在 `generateCanvasTextToImage` 内读取。
+- 根据 `sourceNode?.metadata?.panorama` 计算 `wantsPanorama`。
+- 使用 `requestPrompt` / `requestConfig` 创建 root / child metadata，并发起请求。
+- success metadata 合并时保留 `panorama`。
+
+伪代码：
+
+```ts
+const wantsPanorama = Boolean(sourceNode?.metadata?.panorama);
+const requestPrompt = wantsPanorama ? buildPanoramaPrompt(input.effectivePrompt) : input.effectivePrompt;
+const requestConfig = wantsPanorama ? buildPanoramaGenerationConfig(input.generationConfig) : input.generationConfig;
+const panoramaMetadata = { panorama: wantsPanorama };
+```
+
+然后：
+
+- `createRootImageNode` 使用 `requestPrompt` 和 `requestConfig`。
+- `createChildImageNode` 使用 `requestPrompt` 和 `requestConfig`。
+- `requestOneImage` 使用 `requestPrompt` 和 `requestConfig`。
+- `applyCanvasImageGenerationSuccess` 的 metadata 合并 `{ ...imageMetadata(uploaded), ...panoramaMetadata }`。
+
+不要在 `canvas-image-generation.ts` 调用 `generateCanvasTextToImage` 前预处理 prompt / config。那样虽然改动更小，但会让全景策略留在 hook 调用点，**Locality** 差一些。
+
+### 6.2 配置节点 / 图片节点生图路径
+
+当前这些路径仍在：
+
+```text
+web/src/app/(user)/canvas/[id]/hooks/canvas-image-generation.ts
+```
+
+第一版直接在这个 hook 内接入 policy，不要等第二阶段重构；这是一项明确执行决策，不是临时绕路。
+
+在 `generateCanvasImage` 开头计算：
+
+```ts
+const wantsPanorama = Boolean(sourceNode?.metadata?.panorama);
+const requestPrompt = wantsPanorama ? buildPanoramaPrompt(effectivePrompt) : effectivePrompt;
+const requestConfig = wantsPanorama ? buildPanoramaGenerationConfig(generationConfig) : generationConfig;
+const generationMetadata = buildImageGenerationMetadata(generationType, requestConfig, count, referenceImages);
+const panoramaMetadata = { panorama: wantsPanorama };
+```
+
+然后替换当前使用点：
+
+- root node title / prompt 使用 `requestPrompt`。
+- child node title / prompt 使用 `requestPrompt`。
+- `requestGeneration` / `requestEdit` 使用 `requestConfig` 和 `requestPrompt`。
+- root / child loading metadata 合并 `panoramaMetadata`。
+- success metadata 合并 `panoramaMetadata`。
+- `buildImageGenerationMetadata` 使用 `requestConfig`，确保 metadata.size 是 `"2:1"`。
+
+第一版不新增 `originalPrompt`、`lastEffectivePrompt` 等 metadata 字段。生成结果的 `metadata.prompt` 使用最终请求 prompt，也就是包含全景约束的 prompt；这样复制提示词和重试都不会丢失全景生成约束。
+
+注意：当前 hook 中已经在第 33 行左右提前创建了 `generationMetadata`。接入全景后，这个创建点必须移动到 `requestConfig` 计算之后，否则 metadata 里的 size 仍可能是原尺寸。
+
+### 6.3 重试路径
+
+当前重试走：
+
+```text
+canvas-image-generation.ts
+  -> retryCanvasGeneratedImage(...)
+  -> canvas-generation-orchestration.ts
+```
+
+在 `retryCanvasGeneratedImage` 内处理：
+
+- `wantsPanorama = Boolean(input.savedImageMetadata?.panorama || input.node.metadata?.panorama)`。
+- 使用 `requestPrompt` / `requestConfig` 请求。
+- `retryGenerationMetadata` 使用 `requestConfig`。
+- success metadata 保留 `panorama: wantsPanorama`。
+
+这样失败后的全景图重试不会退回普通图片。
+
+### 6.4 批量主图传播
+
+当前 `setBatchPrimary` 只传播这些字段：
+
+```ts
+content
+primaryImageId
+naturalWidth
+naturalHeight
+freeResize
+```
+
+必须补上：
+
+```ts
+panorama: child.metadata?.panorama,
+```
+
+否则批量生成全景图后，把某个 child 设为主图时，root 会丢失全景查看状态。
+
+## 7. UI 集成点
+
+### 7.1 图片详情弹窗
+
+入口：
 
 ```text
 web/src/app/(user)/canvas/[id]/canvas-client-page.tsx
 ```
 
-当前逻辑：
-
-- `previewNodeId` 决定打开哪个节点的图片详情。
-- 弹窗内直接渲染 `<img>`。
-- 滚轮用于普通图片缩放。
-
-### 8.2 改造流程
-
-1. 引入 `isPanoramaNode`。
-2. 引入 `CanvasPanoramaViewer`。
-3. 根据 `isPanoramaNode(previewNode)` 分支渲染：
+当前弹窗固定普通图片查看。改造：
 
 ```tsx
-{isPanoramaNode(previewNode) ? (
-    <CanvasPanoramaViewer src={previewNode.metadata.content} title={previewNode.title} />
-) : (
-    <普通图片缩放查看 />
-)}
+const previewIsPanorama = isPanoramaNode(previewNode);
 ```
 
-4. 弹窗标题可根据模式显示：
+全景图：
+
+```tsx
+<CanvasPanoramaViewer src={previewNode.metadata.content} title={previewNode.title} />
+```
+
+普通图：
+
+- 保留当前 `<img>` 缩放查看。
+- 保留 `previewScale`、滚轮缩放、双击重置。
+
+全景模式下不要套普通图片滚轮缩放逻辑。滚轮应交给全景 viewer 处理。
+
+弹窗标题：
 
 ```text
 全景图详情
 图片详情
 ```
 
-5. 全景模式下不要套普通图片滚轮缩放逻辑。滚轮应交给全景 viewer 处理。
+### 7.2 图片节点缩略图
 
-### 8.3 验收
-
-- 普通图片详情行为不变。
-- 全景图片详情可以拖拽左右旋转。
-- 在全景详情中滚轮不会缩放底层画布。
-- 双击全景详情不会触发画布节点编辑或重置普通图片缩放。
-
-## 9. 集成点 2：图片节点显示
-
-### 9.1 当前入口
-
-文件：
+入口：
 
 ```text
 web/src/app/(user)/canvas/components/canvas-node.tsx
 ```
 
-当前 `ImageContent` 中直接渲染 `<img>`。
-
-### 9.2 第一版建议
-
-节点内仍显示普通 `<img>` 缩略图，不直接嵌入 WebGL viewer。
-
-原因：
+第一版不在节点内启用 WebGL viewer。原因：
 
 - 画布可能有很多图片节点。
-- 每个节点都初始化 WebGL viewer 会增加内存和显卡压力。
+- 每个节点初始化 viewer 会增加内存和显卡压力。
 - 节点内拖拽会和画布拖拽、框选、连线、缩放抢事件。
-- 缩略图只需要告诉用户“这是一张全景图”，真正交互放到详情弹窗。
+- 缩略图只需要告诉用户“这是一张全景图”，真正交互在详情弹窗。
 
-### 9.3 改造流程
+改造：
 
-1. `ImageContent` 判断 `node.metadata?.panorama`。
-2. 如果是全景图，在图片右上角显示一个小标识：
+- `ImageContent` 使用 `isPanoramaNode(node)`。
+- 如果是全景图，在右上角显示低视觉重量标识：`全景`。
+- 标识不拦截事件。
+- 保持“以图生图 / 图生视频”操作不变。
 
-```text
-全景
-```
+### 7.3 图片工具栏切换
 
-3. 标识只做展示，不拦截事件。
-4. 保持现有底部“以图生图 / 图生视频”操作不变。
-
-### 9.4 后续可选
-
-等弹窗全景查看稳定后，再考虑“选中节点时内嵌全景预览”。那会是第二个切片，不要混进第一版。
-
-## 10. 集成点 3：图片工具栏切换全景状态
-
-### 10.1 当前入口
-
-涉及文件：
+入口：
 
 ```text
 web/src/app/(user)/canvas/components/canvas-image-toolbar-tools.tsx
@@ -399,134 +472,58 @@ web/src/app/(user)/canvas/components/canvas-node-hover-toolbar.tsx
 web/src/app/(user)/canvas/[id]/canvas-client-page.tsx
 ```
 
-### 10.2 Interface
+增加工具 id：
 
-给图片工具定义增加一个操作：
+```ts
+export type ImageNodeActionToolId = ... | "panorama";
+```
+
+增加 handler：
 
 ```ts
 onTogglePanorama: (node: CanvasNodeData) => void;
 ```
 
-工具 id：
+工具定义：
+
+- `panelLabel`: `全景图`
+- `label`: active 时 `全景`，非 active 时 `平面`
+- `title`: active 时 `切换为平面图片`，非 active 时 `切换为全景图`
+- `active`: `isPanoramaNode(node)`
+- icon：优先用 `lucide-react` 的 `Orbit`，如果不可用再选接近环视语义的图标。
+
+页面 handler：
 
 ```ts
-"panorama"
-```
-
-文案：
-
-```text
-全景
-平面
-```
-
-### 10.3 改造流程
-
-1. 在 `ImageNodeActionToolId` 中加入 `"panorama"`。
-2. 在 `ImageToolHandlers` 中加入 `onTogglePanorama`。
-3. 在 `imageToolDefinitions` 中加入一个工具：
-   - active：`Boolean(node.metadata?.panorama)`
-   - label：active 时显示 `全景` 或 `退出全景`，最终文案以 UI 空间为准。
-   - icon：优先用 `lucide-react` 中接近全景/环绕语义的图标，例如 `Orbit`、`PanelsTopLeft` 或 `CircleDot`。
-4. 在 `CanvasNodeHoverToolbar` 中接收并传递 `onTogglePanorama`。
-5. 在 `canvas-client-page.tsx` 中实现：
-
-```ts
-const toggleNodePanorama = useCallback((node: CanvasNodeData) => {
+const toggleNodePanorama = useCallback((nodeId: string) => {
     setNodes((prev) =>
-        prev.map((item) =>
-            item.id === node.id
-                ? { ...item, metadata: { ...item.metadata, panorama: !item.metadata?.panorama } }
-                : item,
+        prev.map((node) =>
+            node.id === nodeId
+                ? { ...node, metadata: applyPanoramaMetadata(node.metadata, !node.metadata?.panorama) }
+                : node,
         ),
     );
 }, []);
 ```
 
-### 10.4 是否需要 ratio 校验
+工具配置注意：
 
-第一版不阻止用户把非 2:1 图片标记为全景图。
+- 当前 `IMAGE_QUICK_TOOLS_STORAGE_KEY` 是 `canvas-image-quick-tools-v7`。
+- 第一版直接 bump 到 `canvas-image-quick-tools-v8`，让老用户拿到包含“全景”的新默认工具。
+- 不做复杂迁移。这里接受重置图片快捷工具配置，换取实现简单和行为清晰。
 
-建议只做非阻断提醒：
+### 7.4 上传和替换图片
 
-- 如果 `naturalWidth / naturalHeight` 明显不是 2:1，打开全景详情时显示轻提示：
-  - `这张图片不是 2:1，全景查看可能会变形`
+当前上传替换图片时，`cleanUploadedMediaMetadata` 不清理 `panorama`，所以新图片会继承旧节点的全景状态。
 
-不要为了这个提醒引入新的 store 状态。
+第一版明确保留这个行为：
 
-## 11. 集成点 4：生成配置传播
+- 用户把一个节点切成全景后，替换图片仍保留“这是全景节点”的意图。
+- 如果替换后的图片不是 2:1，打开详情时提醒可能变形。
 
-### 11.1 当前入口
+不要在 `canvas-node-media.ts` 里判断图片比例或清理全景状态。这个判断属于全景 policy，不属于媒体存储 **Module**。
 
-生成配置面板已经有“全景图”开关：
-
-```text
-web/src/app/(user)/canvas/components/canvas-node-prompt-panel.tsx
-```
-
-真正要改的是生成链路：
-
-```text
-web/src/app/(user)/canvas/[id]/hooks/canvas-image-generation.ts
-```
-
-### 11.2 改造流程
-
-在 `generateCanvasImage` 中：
-
-1. 读取源节点全景意图：
-
-```ts
-const wantsPanorama = Boolean(sourceNode?.metadata?.panorama);
-```
-
-2. 如果 `wantsPanorama`：
-
-```ts
-const requestPrompt = buildPanoramaPrompt(effectivePrompt);
-const requestConfig = buildPanoramaGenerationConfig(generationConfig);
-```
-
-3. 如果不是：
-
-```ts
-const requestPrompt = effectivePrompt;
-const requestConfig = generationConfig;
-```
-
-4. 请求图片时使用 `requestPrompt` 和 `requestConfig`。
-5. 创建 rootNode / childNodes 的 metadata 时写入：
-
-```ts
-panorama: wantsPanorama || undefined
-```
-
-6. `buildImageGenerationMetadata` 中记录的 `size` 应是实际请求尺寸，即全景模式下为 `2:1`。
-7. title 和 prompt 快照建议使用 `requestPrompt` 或同时保存：
-   - `prompt`: 用户原始有效 prompt
-   - `lastEffectivePrompt`: 含全景约束的 prompt
-
-当前 metadata 没有 `lastEffectivePrompt` 字段。如果不想扩字段，第一版可以让 `prompt` 保存最终请求 prompt。
-
-### 11.3 空图片节点
-
-如果用户选中空图片节点并在其配置中打开全景图：
-
-- 生成后该空图片节点变成图片节点。
-- 该节点 metadata 应包含 `panorama: true`。
-- 尺寸由真实图片比例决定，通常会被 `fitNodeSize` 处理为 2:1 缩略图。
-
-### 11.4 批量生成
-
-如果 `count > 1`：
-
-- rootNode 和所有 childNodes 都应继承 `panorama: true`。
-- 设置主图时，rootNode 保持 `panorama: true`。
-- 批量展开、收起逻辑不需要知道全景细节。
-
-这就是 **Leverage**：批量节点不需要新增全景分支，只要 metadata 正确传播。
-
-## 12. 数据模型
+## 8. 数据模型
 
 第一版只使用现有字段：
 
@@ -545,22 +542,35 @@ panoramaInitialFov?: number;
 
 原因：
 
-- 当前只有 equirectangular。
+- 当前只支持 equirectangular 查看。
 - 当前没有保存初始视角的用户需求。
-- 当前没有 cubemap 或 tiles。
+- 当前没有 cubemap、tiles、360 视频。
 - 新字段会扩大 **Interface**，但暂时没有产生对应 **Leverage**。
 
-等出现真实需求后再加。
+如果后续要支持比例检查，先在 policy **Module** 增加派生函数，而不是立刻扩 metadata：
 
-## 13. 推荐实施顺序
+```ts
+export function getPanoramaReadiness(node: CanvasNodeData): {
+    ready: boolean;
+    warning?: string;
+};
+```
 
-### Step 1：新增纯策略 Module
+第一版不阻止用户把非 2:1 图片标记为全景图。打开详情时可以轻提示：
+
+```text
+这张图片不是 2:1，全景查看可能会变形
+```
+
+## 9. 第一版实施顺序
+
+### Step 1：新增全景策略 Module
 
 新增：
 
 ```text
-web/src/app/(user)/canvas/utils/canvas-panorama.ts
-web/src/app/(user)/canvas/utils/canvas-panorama.test.ts
+web/src/app/(user)/canvas/services/canvas-panorama-policy.ts
+web/src/app/(user)/canvas/services/canvas-panorama-policy.test.ts
 ```
 
 完成：
@@ -571,15 +581,43 @@ web/src/app/(user)/canvas/utils/canvas-panorama.test.ts
 - metadata 写入。
 - 单元测试。
 
-这是最安全的第一步，因为不碰 UI，也不碰第三方库。
+### Step 2：接入当前生成路径
 
-### Step 2：新增 Viewer Module
+修改：
+
+```text
+web/src/app/(user)/canvas/services/canvas-generation-orchestration.ts
+web/src/app/(user)/canvas/services/canvas-generation-orchestration.test.ts
+web/src/app/(user)/canvas/[id]/hooks/canvas-image-generation.ts
+```
+
+完成：
+
+- 文本生图路径应用全景 prompt / config / metadata。
+- 配置节点和图片节点生图路径应用全景 prompt / config / metadata。
+- 重试路径保留全景状态。
+- `buildImageGenerationMetadata` 使用实际请求 config。
+- 批量 root / child 都写入 `panorama`。
+
+### Step 3：补批量主图传播
+
+修改：
+
+```text
+web/src/app/(user)/canvas/[id]/canvas-client-page.tsx
+```
+
+完成：
+
+- `setBatchPrimary` 从 child 写回 root 时传播 `panorama`。
+
+### Step 4：新增 Viewer Module
 
 安装依赖：
 
 ```bash
 cd /Users/a1/Desktop/my-canvas/web
-npm install @photo-sphere-viewer/core
+bun add @photo-sphere-viewer/core
 ```
 
 新增：
@@ -597,7 +635,7 @@ web/src/app/(user)/canvas/components/canvas-panorama-viewer.tsx
 - 错误状态。
 - 稳定容器尺寸。
 
-### Step 3：接入图片详情弹窗
+### Step 5：接入图片详情弹窗
 
 修改：
 
@@ -610,8 +648,9 @@ web/src/app/(user)/canvas/[id]/canvas-client-page.tsx
 - 全景图打开 `CanvasPanoramaViewer`。
 - 普通图保留现有 `<img>` 缩放逻辑。
 - 弹窗标题区分全景 / 普通。
+- 全景详情内滚轮和拖拽不影响底层画布。
 
-### Step 4：给图片节点加全景标识
+### Step 6：给图片节点加全景标识
 
 修改：
 
@@ -625,9 +664,7 @@ web/src/app/(user)/canvas/components/canvas-node.tsx
 - 全景图片显示低干扰小标识。
 - 不初始化节点内 WebGL。
 
-注意：该文件当前可能已有用户改动，实施前必须重新读文件并小心合并。
-
-### Step 5：工具栏加入全景切换
+### Step 7：工具栏加入全景切换
 
 修改：
 
@@ -641,92 +678,88 @@ web/src/app/(user)/canvas/[id]/canvas-client-page.tsx
 
 - 图片工具中出现“全景”切换。
 - 修改当前节点 metadata。
-- 可通过工具设置隐藏或显示。
+- 将 `IMAGE_QUICK_TOOLS_STORAGE_KEY` 升到 `canvas-image-quick-tools-v8`。
 
-### Step 6：生成链路传播全景状态
+## 10. 第二阶段：继续深化 Generation Orchestration
 
-修改：
+第一版可以先在当前 hook 里接入全景策略。但从 **Depth** 看，`canvas-image-generation.ts` 里配置节点 / 图片节点分支仍然太深、太知道图结构 implementation。
+
+第二阶段目标：
 
 ```text
-web/src/app/(user)/canvas/[id]/hooks/canvas-image-generation.ts
+Canvas generation orchestration module
+├── 文本节点生图
+├── 配置节点生图
+├── 空图片节点生图
+├── 已有图片节点以图生图
+├── 批量 root / child 创建
+├── 请求 generate / edit
+├── 媒体 materialize
+├── graph mutation success / error
+└── 返回 UI state
 ```
 
-完成：
+推荐新增统一 **Interface**：
 
-- 读取配置节点的 `metadata.panorama`。
-- 生成请求强制 `size: "2:1"`。
-- prompt 追加全景约束。
-- 生成结果写入 `panorama: true`。
-- 批量结果都继承全景状态。
+```ts
+export type CanvasImageGenerationSourceKind = "text" | "config" | "image" | "empty-image";
 
-### Step 7：手动验证
+export type CanvasImageGenerationInput = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    sourceNodeId: string;
+    sourceKind: CanvasImageGenerationSourceKind;
+    prompt: string;
+    effectivePrompt: string;
+    generationConfig: AiConfig;
+    referenceImages: ReferenceImage[];
+    createId?: () => string;
+    createConnectionId?: () => string;
+    requester?: CanvasImageGenerationRequester;
+    mediaAdapter?: CanvasNodeMediaAdapter;
+    onStart?: (state: CanvasImageGenerationStartState) => void;
+};
 
-验证场景：
+export async function generateCanvasImageOnCanvas(
+    input: CanvasImageGenerationInput,
+): Promise<CanvasImageGenerationResult>;
+```
 
-- 上传一张 2:1 全景图，切换为全景，打开详情可拖拽。
+调用方不应知道：
+
+- root 节点和 child 节点如何定位。
+- 批量生成如何创建 child。
+- 哪些时候 rootId 复用空图片节点 id。
+- 成功时 root 和 child metadata 如何合并。
+- 失败时 root / child / source 状态如何收尾。
+
+这一阶段不是第一版全景功能的前置条件。它是全景接入后顺手能看见的下一块 deepening 工作。
+
+## 11. 验收
+
+功能验收：
+
+- 上传一张 2:1 全景图，切换为全景，打开详情可拖拽环视。
 - 上传一张普通图，打开详情仍为普通图片缩放。
-- 生成配置打开“全景图”，生成后输出节点自动带全景标识。
-- 批量生成全景图，每张候选都可全景查看。
-- 在全景详情里滚轮、拖拽不影响底层画布。
-- 下载、保存素材、以图生图、图生视频不受影响。
+- 替换一张全景节点的图片后，全景状态按设计保留。
+- 生成配置打开“全景图”，生成请求使用 2:1，生成结果自动带全景标识。
+- 文本节点、配置节点、空图片节点、已有图片节点生图都能传播 `panorama`。
+- 批量生成全景图，root 和 child 都可全景查看。
+- 批量图选择主图后，root 仍保持全景状态。
+- 全景详情里滚轮、拖拽、双击不影响底层画布。
+- 下载、保存素材、以图生图、图生视频不回退。
 
-## 14. 测试策略
+测试验收：
 
-优先测试纯 **Module**：
+- `canvas-panorama-policy.test.ts` 覆盖策略 **Interface**。
+- `canvas-generation-orchestration.test.ts` 至少覆盖文本生图和重试的全景传播。
+- `canvas-image-generation.ts` 如果暂时保留 hook implementation，需要补对应测试或通过现有生成测试覆盖请求 config / prompt / metadata。
+- React / WebGL 部分第一版以手动验证为主。
+- 若补自动测试，只测试 `CanvasPanoramaViewer` 可观察行为：空 src、容器渲染、unmount 调用 destroy。不要测试 Photo Sphere Viewer 内部。
 
-```text
-canvas-panorama.test.ts
-```
+## 12. 风险和处理
 
-覆盖：
-
-- 全景判断。
-- prompt 增强。
-- config patch。
-- metadata patch。
-
-对 React / WebGL 部分，第一版以手动验证为主。Photo Sphere Viewer 本身已经承担渲染复杂度，本项目只需验证：
-
-- lifecycle 没有明显报错。
-- 事件没有穿透到画布。
-- src 变化能刷新。
-- 错误状态能显示。
-
-如果要补自动测试，不要测试 Photo Sphere Viewer 内部。只测试 `CanvasPanoramaViewer` 的可观察行为：
-
-- 有容器。
-- 传空 src 时显示错误或空状态。
-- unmount 时调用 destroy。这里可以 mock 第三方构造函数。
-
-## 15. 删除测试
-
-想象删除 `Canvas Panorama Policy Module`：
-
-- prompt 全景约束会散落到生成链路。
-- 2:1 尺寸规则会散落到生成链路。
-- metadata 写入会散落到 rootNode、childNode、retry 逻辑。
-- 测试要跨多个调用点重复断言。
-
-所以它值得存在。
-
-想象删除 `Canvas Panorama Viewer Module`：
-
-- Photo Sphere Viewer 初始化会散落到图片详情弹窗。
-- CSS 引入、销毁、事件隔离会散落到 UI 文件。
-- 未来若要节点内预览或素材预览，会重复第三方库生命周期。
-
-所以它也值得存在。
-
-但想象新增 `PanoramaProvider` seam：
-
-- 当前只有一个 Photo Sphere Viewer **Adapter**。
-- 删除它以后复杂度不会回到多个真实调用方，而只是少了一层转发。
-
-所以第一版不要加。
-
-## 16. 风险和处理
-
-### 16.1 WebGL 黑屏
+### WebGL 黑屏
 
 可能原因：
 
@@ -736,55 +769,97 @@ canvas-panorama.test.ts
 
 处理：
 
-- 容器设置稳定 `min-height`。
-- 使用已有 `metadata.content`，项目本地图片通常是 blob URL 或 data URL。
+- viewer 容器设置稳定宽高。
+- 使用项目已有 `metadata.content`，通常是 blob URL、data URL 或可解析 URL。
 - 初始化失败显示中文错误。
 
-### 16.2 图片比例不对导致变形
+### 图片比例不对导致变形
 
 处理：
 
-- 不阻断。
+- 第一版不阻断。
 - 打开详情时轻提示。
-- 后续可在 `Canvas Panorama Policy Module` 增加 `getPanoramaReadiness(node)`。
+- 后续在 policy **Module** 增加 `getPanoramaReadiness`。
 
-### 16.3 事件穿透到底层画布
+### 事件穿透到底层画布
 
 处理：
 
 - viewer 外层统一 `data-canvas-no-zoom`。
 - viewer 外层阻止 wheel / pointer / mouse / double click 冒泡。
-- 不在画布节点缩略图里直接启用交互 viewer。
+- 不在画布节点缩略图里直接启用 viewer。
 
-### 16.4 生成模型不听 2:1 或全景 prompt
+### 工具栏配置版本
+
+风险：
+
+- 新增 `panorama` 默认工具后，老用户 localStorage 里仍保存旧工具列表，导致看不到新工具。
+
+处理：
+
+- 直接 bump `IMAGE_QUICK_TOOLS_STORAGE_KEY` 到 `canvas-image-quick-tools-v8`。
+- 不做旧配置迁移；接受图片快捷工具配置重置一次。
+
+### 生成模型不听全景约束
 
 处理：
 
 - 前端只能提高概率，不能保证模型一定产出真实无缝全景。
-- 生成请求强制 `size: "2:1"`。
-- prompt 加 equirectangular 和 seamless horizontal wrap。
-- 后续如果接专门全景模型，再做生成 **Adapter**，不要在第一版引入。
+- 请求强制 `size: "2:1"`。
+- `size: "2:1"` 的后端支持由后端改造保证，本计划不把它作为前端待确认项。
+- prompt 增加 equirectangular 和 seamless horizontal wrap。
+- 后续如果接专门全景模型，再重新设计生成模型选择 **Seam**。
 
-## 17. 后续演进
+## 13. 删除测试
+
+想象删除 `Canvas panorama policy module`：
+
+- 全景 prompt、2:1 尺寸、metadata 写入会散落到生成、重试、toolbar、详情查看。
+- 测试需要跨多个调用点重复断言。
+
+所以它值得存在。
+
+想象删除 `Canvas panorama viewer module`：
+
+- Photo Sphere Viewer 初始化、CSS、销毁、事件隔离会散落到图片详情弹窗。
+- 未来若要素材预览或节点内选中态预览，会重复第三方库生命周期。
+
+所以它值得存在。
+
+想象新增 `PanoramaProvider`：
+
+- 当前只有一个 Photo Sphere Viewer **Adapter**。
+- 删除它以后复杂度不会回到多个真实调用方，只会少一层浅转发。
+
+所以第一版不要加。
+
+想象继续保留当前 `canvas-image-generation.ts` 的配置节点 / 图片节点 implementation：
+
+- 第一版可以接受，因为它降低全景闭环风险。
+- 长期不理会则会继续扩大 hook 的 **Interface** 和隐含知识，生成行为难以通过一个 **Seam** 测完。
+
+所以它不是第一版 blocker，但应作为第二阶段 deepening。
+
+## 14. 后续演进
 
 第一版完成后，可以按价值继续加：
 
-1. 节点内选中态全景预览。
+1. 节点选中态内嵌全景预览。
 2. 保存初始视角。
 3. 全景截图，导出当前视角为普通图片节点。
 4. cubemap 支持。
 5. 超大图 tiles 支持。
 6. 全景热点和多场景 tour。
 7. 360 视频。
-8. 接入专门的全景生成模型，例如 SDXL 360 Diffusion、PanFusion、Diffusion360 或 ComfyUI 工作流。
+8. 接入专门的全景生成模型或 ComfyUI 工作流。
 
 每一步都要重新问：
 
 - 新能力是否需要扩大现有 **Interface**？
-- 是否真的有第二个 **Adapter**，值得新增 seam？
+- 是否真的有第二个 **Adapter**，值得新增 **Seam**？
 - 删除该 **Module** 时，复杂度会回到几个调用方？
 
-## 18. 最小完成定义
+## 15. 最小完成定义
 
 第一版完成后，应满足：
 
@@ -793,7 +868,8 @@ canvas-panorama.test.ts
 - 普通图片行为不回退。
 - 生成配置打开“全景图”后，生成结果自动进入全景模式。
 - 生成请求使用 2:1 尺寸。
-- 全景 prompt 逻辑有测试。
+- 文本 / 配置 / 图片节点生成路径都不丢失全景状态。
+- 批量 root / child / primary 选择都不丢失全景状态。
+- 全景 prompt 和 config 逻辑有单元测试。
 - 全景 viewer 的第三方库细节不泄漏到多个调用方。
-- 没有新增浅层转发 **Module**。
-
+- 没有新增浅层 provider **Seam**。

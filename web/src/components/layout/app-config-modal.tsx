@@ -8,6 +8,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
+import { maxImageCountForModel, normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 import { useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -69,6 +70,7 @@ export function AppConfigModal() {
     const effectiveConfig = useEffectiveConfig();
     const effectiveMode = config.channelMode;
     const modelConfig = effectiveMode === "remote" ? effectiveConfig : config;
+    const canvasImageCountMax = maxImageCountForModel(modelConfig.imageModel || modelConfig.model);
     const webdavReady = Boolean(webdav.url.trim());
 
     const finishConfig = () => {
@@ -221,14 +223,14 @@ export function AppConfigModal() {
                         ))}
                     </div>
                     <div className="grid gap-4 md:grid-cols-4">
-                        <Form.Item label="画布默认生图张数" extra="新建画布生图和配置节点默认使用，单个节点仍可单独覆盖。" className="mb-4">
+                        <Form.Item label="画布默认生图张数" extra={`新建画布生图和配置节点默认使用，当前模型最多 ${canvasImageCountMax} 张。`} className="mb-4">
                             <Input
                                 type="number"
                                 min={1}
-                                max={15}
+                                max={canvasImageCountMax}
                                 value={config.canvasImageCount}
                                 onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
-                                onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
+                                onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value, modelConfig.imageModel || modelConfig.model))}
                             />
                         </Form.Item>
                         <Form.Item label="默认音频声音" className="mb-4">
@@ -319,8 +321,8 @@ export function AppConfigModal() {
     );
 }
 
-function normalizeImageCount(value: string) {
-    return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3))));
+function normalizeImageCount(value: string, model?: string) {
+    return String(normalizeImageGenerationCount(value, model, 3));
 }
 
 function formatWebdavTime(value: string) {

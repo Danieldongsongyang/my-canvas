@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 import type { AiConfig } from "@/stores/use-config-store";
 import { getNodeSpec } from "../constants";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "../types";
@@ -17,16 +18,7 @@ type UseImageNodeHandlersOptions = {
 
 const NODE_GAP = 96;
 
-export function useImageNodeHandlers({
-    nodesRef,
-    connectionsRef,
-    setNodes,
-    setConnections,
-    setSelectedNodeIds,
-    setSelectedConnectionId,
-    setDialogNodeId,
-    effectiveConfig,
-}: UseImageNodeHandlersOptions) {
+export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, effectiveConfig }: UseImageNodeHandlersOptions) {
     const handleImageToImage = (node: CanvasNodeData) => {
         if (node.type !== CanvasNodeType.Image) return;
         const sourceNode = nodesRef.current.find((item) => item.id === node.id);
@@ -39,7 +31,7 @@ export function useImageNodeHandlers({
             model: effectiveConfig.imageModel || effectiveConfig.model,
             size: effectiveConfig.size,
             quality: effectiveConfig.quality,
-            count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+            count: normalizeImageGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count, effectiveConfig.imageModel || effectiveConfig.model),
         });
 
         addWorkflowNode({
@@ -107,10 +99,6 @@ function createWorkflowNode(type: CanvasNodeType.Image | CanvasNodeType.Video, s
         height: spec.height,
         metadata: { ...spec.metadata, ...metadata },
     };
-}
-
-function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
 function addWorkflowNode({

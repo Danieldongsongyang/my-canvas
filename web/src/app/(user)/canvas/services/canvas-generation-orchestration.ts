@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasConnection, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
@@ -78,7 +79,7 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
     const sourceNode = input.nodes.find((node) => node.id === input.sourceNodeId);
     const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-    const count = getGenerationCount(input.generationConfig.count);
+    const count = normalizeImageGenerationCount(input.generationConfig.count, input.generationConfig.model || input.generationConfig.imageModel);
     const rootNodeId = createCanvasGenerationId(input.createId);
     const childNodeIds = createBatchChildNodeIds(count, input.createId);
     const targetNodeIds = count > 1 ? childNodeIds : [rootNodeId];

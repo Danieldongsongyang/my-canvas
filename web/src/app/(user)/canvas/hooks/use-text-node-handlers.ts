@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 import type { AiConfig } from "@/stores/use-config-store";
 import { getNodeSpec } from "../constants";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "../types";
@@ -17,16 +18,7 @@ type UseTextNodeHandlersOptions = {
 
 const NODE_GAP = 96;
 
-export function useTextNodeHandlers({
-    nodesRef,
-    connectionsRef,
-    setNodes,
-    setConnections,
-    setSelectedNodeIds,
-    setSelectedConnectionId,
-    requestTextEdit,
-    effectiveConfig,
-}: UseTextNodeHandlersOptions) {
+export function useTextNodeHandlers({ nodesRef, connectionsRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, requestTextEdit, effectiveConfig }: UseTextNodeHandlersOptions) {
     const handleWriteTextContent = (node: CanvasNodeData) => {
         if (node.type !== CanvasNodeType.Text) return;
         updateTextNode(nodesRef, setNodes, node.id, { textMode: "editing" });
@@ -45,7 +37,7 @@ export function useTextNodeHandlers({
             model: effectiveConfig.imageModel || effectiveConfig.model,
             size: effectiveConfig.size,
             quality: effectiveConfig.quality,
-            count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+            count: normalizeImageGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count, effectiveConfig.imageModel || effectiveConfig.model),
         });
 
         addWorkflowNode({
@@ -143,9 +135,7 @@ function addWorkflowNode({
     setSelectedConnectionId: (connectionId: string | null) => void;
     requestTextEdit: (nodeId: string) => void;
 }) {
-    const nextNodes: CanvasNodeData[] = nodesRef.current
-        .map((item): CanvasNodeData => (item.id === sourceNode.id ? { ...item, metadata: { ...item.metadata, textMode: "editing", linkedOutputNodeId: childNode.id } } : item))
-        .concat(childNode);
+    const nextNodes: CanvasNodeData[] = nodesRef.current.map((item): CanvasNodeData => (item.id === sourceNode.id ? { ...item, metadata: { ...item.metadata, textMode: "editing", linkedOutputNodeId: childNode.id } } : item)).concat(childNode);
     const nextConnections = [...connectionsRef.current, { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: childNode.id }];
 
     nodesRef.current = nextNodes;
@@ -155,8 +145,4 @@ function addWorkflowNode({
     setSelectedNodeIds(new Set([sourceNode.id]));
     setSelectedConnectionId(null);
     requestTextEdit(sourceNode.id);
-}
-
-function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }

@@ -55,24 +55,8 @@ type UseCanvasWorkspaceSessionParams = {
 
 export function useCanvasWorkspaceSession({ project, canvas, config, panels, files, message }: UseCanvasWorkspaceSessionParams) {
     const cleanupAssetImages = files.cleanupAssetImages;
-    const {
-        nodes,
-        setNodes,
-        connections,
-        setConnections,
-        groups,
-        setGroups,
-        chatSessions,
-        setChatSessions,
-        activeChatId,
-        setActiveChatId,
-        backgroundMode,
-        setBackgroundMode,
-        showImageInfo,
-        setShowImageInfo,
-        projectLoaded,
-        setProjectLoaded,
-    } = useCanvasProjectState();
+    const { nodes, setNodes, connections, setConnections, groups, setGroups, chatSessions, setChatSessions, activeChatId, setActiveChatId, backgroundMode, setBackgroundMode, showImageInfo, setShowImageInfo, projectLoaded, setProjectLoaded } =
+        useCanvasProjectState();
     const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
     const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -96,7 +80,7 @@ export function useCanvasWorkspaceSession({ project, canvas, config, panels, fil
         () => ({
             model: config.effectiveConfig.imageModel || config.effectiveConfig.model,
             size: config.effectiveConfig.size,
-            count: getGenerationCount(config.effectiveConfig.canvasImageCount || config.effectiveConfig.count),
+            count: getGenerationCount(config.effectiveConfig.canvasImageCount || config.effectiveConfig.count, config.effectiveConfig.imageModel || config.effectiveConfig.model),
         }),
         [config.effectiveConfig.canvasImageCount, config.effectiveConfig.count, config.effectiveConfig.imageModel, config.effectiveConfig.model, config.effectiveConfig.size],
     );

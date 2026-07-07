@@ -7,6 +7,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 
 export type ChatCompletionMessage = {
     role: "system" | "user" | "assistant";
@@ -190,7 +191,7 @@ function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) 
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string) {
-    const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const n = normalizeImageGenerationCount(config.count, config.model || config.imageModel);
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
@@ -219,7 +220,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage) {
-    const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const n = normalizeImageGenerationCount(config.count, config.model || config.imageModel);
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const requestPrompt = buildImageReferencePromptText(prompt, references);

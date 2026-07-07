@@ -456,7 +456,7 @@ function InfiniteCanvasPage() {
                     ? {
                           model: effectiveConfig.imageModel || effectiveConfig.model,
                           size: effectiveConfig.size,
-                          count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
+                          count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count, effectiveConfig.imageModel || effectiveConfig.model),
                       }
                     : undefined;
             const newNode = createCanvasNode(type, targetPosition, configMetadata);

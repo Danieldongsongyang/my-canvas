@@ -1,4 +1,5 @@
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 import { resolveImageUrl, type UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -118,8 +119,8 @@ export async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
 }
 
-export function getGenerationCount(count: string) {
-    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
+export function getGenerationCount(count: string, model?: string) {
+    return normalizeImageGenerationCount(count, model);
 }
 
 export function getInputSummary(inputs: Array<{ type: "text" | "image" | "video" | "audio" }>) {
@@ -183,7 +184,11 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
-        count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
+        count: String(
+            mode === "image"
+                ? getGenerationCount(String(node?.metadata?.count || config.canvasImageCount || config.count || defaultConfig.count), node?.metadata?.model || defaultModel || config.model)
+                : node?.metadata?.count || config.count || defaultConfig.count,
+        ),
     };
 }
 

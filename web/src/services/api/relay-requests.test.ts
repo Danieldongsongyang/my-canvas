@@ -170,6 +170,17 @@ describe("relay-backed canvas api requests", () => {
         expect(postHeaders(2)).not.toHaveProperty("Authorization");
     });
 
+    it("clamps Dreamina image request counts to the provider limit", async () => {
+        axiosMocks.post.mockResolvedValue({ data: { data: [{ b64_json: "AAA" }] } });
+        const config = { ...remoteConfig, model: "dreamina-image-4.7", imageModel: "dreamina-image-4.7", count: "15" };
+
+        await requestGeneration(config, "生成一张图");
+        await requestEdit(config, "改一下图片", [{ id: "ref-1", name: "ref.png", type: "image/png", dataUrl: "data:image/png;base64,AAA" }]);
+
+        expect(axiosMocks.post.mock.calls[0][1]).toEqual(expect.objectContaining({ n: 10 }));
+        expect((axiosMocks.post.mock.calls[1][1] as FormData).get("n")).toBe("10");
+    });
+
     it("re-initializes relay and keeps remote audio requests on canvas relay without bearer keys", async () => {
         axiosMocks.post.mockResolvedValue({ data: new Blob(["audio"], { type: "audio/mpeg" }) });
 
