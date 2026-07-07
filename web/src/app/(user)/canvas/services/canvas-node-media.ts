@@ -1,6 +1,6 @@
 import { deleteStoredImages, listStoredImageKeys, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 
-import { CanvasNodeType, type CanvasAssistantSession, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
+import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantSession, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
 
 export type CanvasImageMediaAdapter = {
     upload: (input: string | Blob) => Promise<UploadedImage>;
@@ -26,6 +26,13 @@ export type CanvasImageMediaInput = {
     mimeType?: string;
 };
 
+type HydratableAssistantImageMedia = {
+    dataUrl?: string;
+    storageKey?: string;
+};
+
+const IMAGE_STORAGE_KEY_PREFIX = "image:";
+
 const defaultCanvasImageMediaAdapter: CanvasImageMediaAdapter = {
     upload: uploadImage,
     resolveUrl: resolveImageUrl,
@@ -39,36 +46,20 @@ export async function hydrateCanvasNodeImageMedia(node: CanvasNodeData, adapter:
     return metadata === node.metadata ? node : { ...node, metadata };
 }
 
-export async function hydrateCanvasNodesImageMedia(nodes: CanvasNodeData[], adapter: CanvasImageMediaAdapter = defaultCanvasImageMediaAdapter) {
-    return Promise.all(nodes.map((node) => hydrateCanvasNodeImageMedia(node, adapter)));
-}
-
-export async function hydrateCanvasAssistantImageMedia(sessions: CanvasAssistantSession[], adapter: CanvasImageMediaAdapter = defaultCanvasImageMediaAdapter) {
-    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T): Promise<T> => {
-        if (item.storageKey) return { ...item, dataUrl: await adapter.resolveUrl(item.storageKey, item.dataUrl) };
-        if (!item.dataUrl?.startsWith("data:image/")) return item;
-        const image = await adapter.upload(item.dataUrl);
-        return { ...item, dataUrl: image.url, storageKey: image.storageKey };
-    };
-
+export async function hydrateCanvasAssistantImageMedia(sessions: CanvasAssistantSession[], adapter: CanvasImageMediaAdapter = defaultCanvasImageMediaAdapter): Promise<CanvasAssistantSession[]> {
     return Promise.all(
         sessions.map(async (session) => ({
             ...session,
-            messages: await Promise.all(
-                session.messages.map(async (message) => ({
-                    ...message,
-                    references: await Promise.all((message.references || []).map(hydrateItem)),
-                    images: await Promise.all((message.images || []).map(hydrateItem)),
-                })),
-            ),
+            messages: await Promise.all(session.messages.map((message) => hydrateAssistantMessageImageMedia(message, adapter))),
         })),
     );
 }
 
 export async function materializeCanvasImageMedia(input: CanvasImageMediaInput, adapter: CanvasImageMediaAdapter = defaultCanvasImageMediaAdapter): Promise<UploadedImage> {
     if (!input.storageKey) return adapter.upload(input.dataUrl);
+    const url = await adapter.resolveUrl(input.storageKey, input.dataUrl);
     return {
-        url: await adapter.resolveUrl(input.storageKey, input.dataUrl),
+        url,
         storageKey: input.storageKey,
         width: input.width || 0,
         height: input.height || 0,
@@ -77,29 +68,52 @@ export async function materializeCanvasImageMedia(input: CanvasImageMediaInput, 
     };
 }
 
-export async function cleanupUnusedCanvasImageMedia(input: CanvasImageMediaCleanupInput, adapter: CanvasImageMediaAdapter = defaultCanvasImageMediaAdapter) {
+export async function cleanupUnusedCanvasImageMedia(input: CanvasImageMediaCleanupInput, adapter: CanvasImageMediaAdapter = defaultCanvasImageMediaAdapter): Promise<void> {
     const usedKeys = collectCanvasImageStorageKeys(input);
     const unusedKeys = (await adapter.listStorageKeys()).filter((key) => !usedKeys.has(key));
     if (unusedKeys.length) await adapter.deleteStorageKeys(unusedKeys);
 }
 
-export function collectCanvasImageStorageKeys(value: unknown, keys = new Set<string>()) {
+export function collectCanvasImageStorageKeys(value: unknown, keys = new Set<string>()): Set<string> {
     if (!value || typeof value !== "object") return keys;
-    if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.startsWith("image:")) keys.add(value.storageKey);
-    Object.values(value).forEach((item) => {
-        if (Array.isArray(item)) item.forEach((child) => collectCanvasImageStorageKeys(child, keys));
-        else collectCanvasImageStorageKeys(item, keys);
-    });
+
+    const storageKey = "storageKey" in value ? value.storageKey : undefined;
+    if (typeof storageKey === "string" && storageKey.startsWith(IMAGE_STORAGE_KEY_PREFIX)) keys.add(storageKey);
+
+    for (const item of Object.values(value)) {
+        if (Array.isArray(item)) {
+            item.forEach((child) => collectCanvasImageStorageKeys(child, keys));
+        } else {
+            collectCanvasImageStorageKeys(item, keys);
+        }
+    }
+
     return keys;
+}
+
+async function hydrateAssistantMessageImageMedia(message: CanvasAssistantMessage, adapter: CanvasImageMediaAdapter): Promise<CanvasAssistantMessage> {
+    return {
+        ...message,
+        references: await Promise.all((message.references || []).map((reference) => hydrateAssistantImageMediaItem(reference, adapter))),
+        images: await Promise.all((message.images || []).map((image) => hydrateAssistantImageMediaItem(image, adapter))),
+    };
+}
+
+async function hydrateAssistantImageMediaItem<T extends HydratableAssistantImageMedia>(item: T, adapter: CanvasImageMediaAdapter): Promise<T> {
+    if (item.storageKey) return { ...item, dataUrl: await adapter.resolveUrl(item.storageKey, item.dataUrl) };
+    if (!item.dataUrl?.startsWith("data:image/")) return item;
+
+    const image = await adapter.upload(item.dataUrl);
+    return { ...item, dataUrl: image.url, storageKey: image.storageKey };
 }
 
 async function hydrateImageMetadata(metadata: CanvasNodeMetadata, adapter: CanvasImageMediaAdapter): Promise<CanvasNodeMetadata> {
     if (metadata.storageKey) return { ...metadata, content: await adapter.resolveUrl(metadata.storageKey, metadata.content) };
     if (!metadata.content?.startsWith("data:image/")) return metadata;
-    return imageMetadata(await adapter.upload(metadata.content), metadata);
+    return buildImageMetadata(await adapter.upload(metadata.content), metadata);
 }
 
-function imageMetadata(image: UploadedImage, metadata: CanvasNodeMetadata): CanvasNodeMetadata {
+function buildImageMetadata(image: UploadedImage, metadata: CanvasNodeMetadata): CanvasNodeMetadata {
     return {
         ...metadata,
         content: image.url,

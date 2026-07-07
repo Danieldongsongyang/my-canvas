@@ -76,13 +76,13 @@ describe("canvas node image media", () => {
 
     it("hydrates and migrates assistant image media without caller storage branching", async () => {
         const adapter = createAdapter();
-        const sessions = await hydrateCanvasAssistantImageMedia(
-            [
-                assistantSession(),
-                { ...assistantSession(), id: "session-2", messages: [{ id: "message-2", role: "assistant", mode: "image", text: "", images: [{ id: "legacy", dataUrl: "data:image/png;base64,BBB", prompt: "旧图" }] }] },
-            ],
-            adapter,
-        );
+        const legacySession: CanvasAssistantSession = {
+            ...assistantSession(),
+            id: "session-2",
+            messages: [{ id: "message-2", role: "assistant", mode: "image", text: "", images: [{ id: "legacy", dataUrl: "data:image/png;base64,BBB", prompt: "旧图" }] }],
+        };
+
+        const sessions = await hydrateCanvasAssistantImageMedia([assistantSession(), legacySession], adapter);
 
         expect(sessions[0].messages[0].images?.[0]).toMatchObject({ dataUrl: "blob:assistant", storageKey: "image:assistant" });
         expect(sessions[1].messages[0].images?.[0]).toMatchObject({ dataUrl: "blob:migrated:BBB", storageKey: "image:migrated" });

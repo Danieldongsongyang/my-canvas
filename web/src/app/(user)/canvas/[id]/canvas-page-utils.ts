@@ -1,5 +1,5 @@
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
-import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
+import { resolveImageUrl, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, type UploadedFile } from "@/services/file-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -192,17 +192,18 @@ export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
 }
 
 export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
-    return Promise.all(
-        nodes.map(async (node) => {
-            const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            return hydrateCanvasNodeImageMedia(node);
-        }),
-    );
+    return Promise.all(nodes.map(hydrateCanvasNodeMedia));
 }
 
 export async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
     return hydrateCanvasAssistantImageMedia(sessions);
+}
+
+async function hydrateCanvasNodeMedia(node: CanvasNodeData): Promise<CanvasNodeData> {
+    if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) {
+        return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, node.metadata.content) } };
+    }
+    return hydrateCanvasNodeImageMedia(node);
 }
 
 export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
