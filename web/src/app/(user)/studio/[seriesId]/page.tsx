@@ -28,6 +28,7 @@ import { useConfigStore } from "@/stores/use-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { Asset } from "@/stores/use-asset-store";
+import { selectEffectiveModel } from "@/lib/model-selection";
 import { getAssetCoverUrl } from "@/lib/local-asset-library";
 import { cn } from "@/lib/utils";
 import { CastWorkbenchModal } from "./components/cast-workbench-modal";
@@ -78,15 +79,16 @@ export default function StudioWorkspacePage() {
         videoModel: FOLLOW_GLOBAL_MODEL_VALUE,
     });
     const config = useConfigStore((state) => state.config);
-    const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
+    const remoteModelsError = useConfigStore((state) => state.remoteModelsError);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
 
     const episode = useMemo<StudioEpisode | null>(() => series?.episodes[0] ?? null, [series]);
-    const textModel = series?.modelPreferences.textModel || config.textModel || config.model;
-    const imageModel = series?.modelPreferences.imageModel || config.imageModel;
-    const modelSummary = useMemo(() => buildStudioModelSummary(series?.modelPreferences ?? {}, config), [series?.modelPreferences, config]);
+    const studioModelPreferences = series?.modelPreferences ?? emptyStudioModelPreferences;
+    const textModelSelection = useMemo(() => selectEffectiveModel({ config, capability: "text", studioPreferences: studioModelPreferences, remoteModelsError }), [config, studioModelPreferences, remoteModelsError]);
+    const imageModelSelection = useMemo(() => selectEffectiveModel({ config, capability: "image", studioPreferences: studioModelPreferences, remoteModelsError }), [config, studioModelPreferences, remoteModelsError]);
+    const modelSummary = useMemo(() => buildStudioModelSummary(studioModelPreferences, config, remoteModelsError), [studioModelPreferences, config, remoteModelsError]);
     const steps = useMemo(() => (episode ? buildStudioPipelineSteps(episode) : []), [episode]);
 
     const syncArtDirectionDraft = (nextEpisode: StudioEpisode | null) => {
@@ -96,6 +98,27 @@ export default function StudioWorkspacePage() {
         setStyleName(draft?.name ?? preset.name);
         setPositivePrompt(draft?.positivePrompt ?? preset.positivePrompt);
         setNegativePrompt(draft?.negativePrompt ?? preset.negativePrompt);
+    };
+
+    const ensureTextModelReady = () => {
+        if (textModelSelection.ready) return true;
+        openConfigDialog(true);
+        message.warning(textModelSelection.reason || "请先配置可用的文本模型");
+        return false;
+    };
+
+    const ensureImageModelReady = () => {
+        if (imageModelSelection.ready) return true;
+        openConfigDialog(true);
+        message.warning(imageModelSelection.reason || "请先配置可用的图像模型");
+        return false;
+    };
+
+    const ensureArtDirectionReady = (currentEpisode: StudioEpisode) => {
+        if (readArtDirectionDraft(currentEpisode)) return true;
+        setActiveStep("art_direction");
+        message.warning("请先完成 Style 定调");
+        return false;
     };
 
     useEffect(() => {
@@ -163,11 +186,7 @@ export default function StudioWorkspacePage() {
             message.warning("请先输入剧本内容");
             return;
         }
-        if (!isAiConfigReady(config, textModel)) {
-            openConfigDialog(true);
-            message.warning("请先配置可用的文本模型");
-            return;
-        }
+        if (!ensureTextModelReady()) return;
 
         setParsing(true);
         setParseError("");
@@ -177,7 +196,7 @@ export default function StudioWorkspacePage() {
                 seriesId: series.id,
                 episodeId: episode.id,
                 script: normalizedScript,
-                config: { ...config, model: textModel, textModel },
+                config: withTextGenerationModel(config, textModelSelection.model),
             });
             setSeries(result.series);
             setScript(result.episode.script);
@@ -389,16 +408,8 @@ export default function StudioWorkspacePage() {
         if (!series || !episode) return;
         const shot = episode.shots.find((item) => item.id === shotId);
         if (!shot) return;
-        if (!readArtDirectionDraft(episode)) {
-            setActiveStep("art_direction");
-            message.warning("请先完成 Style 定调");
-            return;
-        }
-        if (!isAiConfigReady(config, imageModel)) {
-            openConfigDialog(true);
-            message.warning("请先配置可用的图像模型");
-            return;
-        }
+        if (!ensureArtDirectionReady(episode)) return;
+        if (!ensureImageModelReady()) return;
         setGeneratingShot(true);
         try {
             let currentEpisode = episode;
@@ -431,7 +442,7 @@ export default function StudioWorkspacePage() {
                 seriesId: series.id,
                 episodeId: episode.id,
                 shotId,
-                config: { ...config, model: imageModel, imageModel },
+                config: withImageGenerationModel(config, imageModelSelection.model),
                 assets,
                 count,
                 allowNoReferences,
@@ -483,23 +494,15 @@ export default function StudioWorkspacePage() {
 
     const runStoryboardBatchGeneration = async (target: Parameters<typeof generateMissingStoryboardShotImages>[0]["target"]) => {
         if (!series || !episode) return;
-        if (!readArtDirectionDraft(episode)) {
-            setActiveStep("art_direction");
-            message.warning("请先完成 Style 定调");
-            return;
-        }
-        if (!isAiConfigReady(config, imageModel)) {
-            openConfigDialog(true);
-            message.warning("请先配置可用的图像模型");
-            return;
-        }
+        if (!ensureArtDirectionReady(episode)) return;
+        if (!ensureImageModelReady()) return;
         setGeneratingStoryboardBatch(true);
         try {
             const result = await generateMissingStoryboardShotImages({
                 repository: studioRepository,
                 seriesId: series.id,
                 episodeId: episode.id,
-                config: { ...config, model: imageModel, imageModel },
+                config: withImageGenerationModel(config, imageModelSelection.model),
                 assets,
                 target,
                 count: 1,
@@ -525,23 +528,15 @@ export default function StudioWorkspacePage() {
 
     const runCastGeneration = async ({ target, count }: { target: Parameters<typeof generateCastReferences>[0]["target"]; count: 1 | 2 | 4 }) => {
         if (!series || !episode) return;
-        if (!readArtDirectionDraft(episode)) {
-            setActiveStep("art_direction");
-            message.warning("请先完成 Style 定调");
-            return;
-        }
-        if (!isAiConfigReady(config, imageModel)) {
-            openConfigDialog(true);
-            message.warning("请先配置可用的图像模型");
-            return;
-        }
+        if (!ensureArtDirectionReady(episode)) return;
+        if (!ensureImageModelReady()) return;
         setGeneratingCast(true);
         try {
             const result = await generateCastReferences({
                 repository: studioRepository,
                 seriesId: series.id,
                 episodeId: episode.id,
-                config: { ...config, model: imageModel, imageModel },
+                config: withImageGenerationModel(config, imageModelSelection.model),
                 target,
                 count,
                 addAsset,
@@ -620,7 +615,8 @@ export default function StudioWorkspacePage() {
                             assets={assets}
                             generating={generatingCast}
                             styleReady={Boolean(readArtDirectionDraft(episode))}
-                            imageModelReady={isAiConfigReady(config, imageModel)}
+                            imageModelReady={imageModelSelection.ready}
+                            imageModelReason={imageModelSelection.reason}
                             onGenerateMissing={() => void generateMissingCastReferences()}
                             onOpenWorkbench={(kind, entityId) => setWorkbenchTarget({ kind, entityId })}
                         />
@@ -658,7 +654,8 @@ export default function StudioWorkspacePage() {
                     episode={episode}
                     assets={assets}
                     generating={generatingCast}
-                    imageModelReady={isAiConfigReady(config, imageModel)}
+                    imageModelReady={imageModelSelection.ready}
+                    imageModelReason={imageModelSelection.reason}
                     onGenerate={(kind, entityId, prompt, count) => void generateWorkbenchCastReferences(kind, entityId, prompt, count)}
                     onSavePrompt={(kind, entityId, prompt) => void saveWorkbenchPrompt(kind, entityId, prompt)}
                     onSelectReference={(kind, entityId, assetId) => void selectWorkbenchReference(kind, entityId, assetId)}
@@ -672,7 +669,8 @@ export default function StudioWorkspacePage() {
                     episode={episode}
                     assets={assets}
                     generating={generatingShot}
-                    imageModelReady={isAiConfigReady(config, imageModel)}
+                    imageModelReady={imageModelSelection.ready}
+                    imageModelReason={imageModelSelection.reason}
                     onSavePrompt={(shotId, prompt) => void saveShotWorkbenchPrompt(shotId, prompt)}
                     onSaveReferences={(shotId, references) => void saveShotWorkbenchReferences(shotId, references)}
                     onGenerate={(shotId, prompt, references, count, allowNoReferences) => void generateShotWorkbenchImages(shotId, prompt, references, count, allowNoReferences)}
@@ -727,6 +725,16 @@ const studioPrimaryButtonClass =
 
 const studioSecondaryButtonClass =
     "!inline-flex !items-center !justify-center !rounded-full !border-[#34d8c4]/40 !bg-[#34d8c4]/10 !font-semibold !text-[#34d8c4] !shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:!border-[#34d8c4]/60 hover:!bg-[#34d8c4]/20 hover:!text-[#f2ede4] disabled:!opacity-50";
+
+const emptyStudioModelPreferences: StudioSeries["modelPreferences"] = {};
+
+function withTextGenerationModel(config: AiConfig, model: string): AiConfig {
+    return { ...config, model, textModel: model };
+}
+
+function withImageGenerationModel(config: AiConfig, model: string): AiConfig {
+    return { ...config, model, imageModel: model };
+}
 
 function PipelineRail({
     series,
@@ -797,7 +805,7 @@ function PipelineRail({
                     </span>
                     <span className="mt-3 grid gap-1.5">
                         {modelSummary.map((item) => (
-                            <span key={item.key} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-2 text-[0.75rem]">
+                            <span key={item.key} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-2 text-[0.75rem]" title={item.reason || item.value}>
                                 <span className="text-[#8b8597]">{item.label}</span>
                                 <span className={cn("truncate", item.source === "missing" ? "text-[#ffa94d]" : "text-[#f2ede4]")}>{item.value}</span>
                                 <span className={cn("font-mono text-[0.5625rem] uppercase tracking-[0.12em]", item.source === "project" ? "text-[#34d8c4]" : "text-[#8b8597]")}>
@@ -1161,6 +1169,7 @@ function CastStep({
     generating,
     styleReady,
     imageModelReady,
+    imageModelReason,
     onGenerateMissing,
     onOpenWorkbench,
 }: {
@@ -1169,6 +1178,7 @@ function CastStep({
     generating: boolean;
     styleReady: boolean;
     imageModelReady: boolean;
+    imageModelReason: string;
     onGenerateMissing: () => void;
     onOpenWorkbench: (kind: StudioCastTargetKind, entityId: string) => void;
 }) {
@@ -1179,7 +1189,7 @@ function CastStep({
     const [activeKind, setActiveKind] = useState<"all" | "character" | "scene" | "prop">("all");
     const visibleSections = activeKind === "all" ? sections : sections.filter((section) => section.kind === activeKind);
     const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
-    const generateDisabledReason = !styleReady ? "先完成 Style 定调" : !imageModelReady ? "请先配置可用的图像模型" : !missingCount ? "参考图已生成" : "";
+    const generateDisabledReason = !styleReady ? "先完成 Style 定调" : !imageModelReady ? imageModelReason || "请先配置可用的图像模型" : !missingCount ? "参考图已生成" : "";
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden">
@@ -1434,6 +1444,7 @@ function ShotWorkbenchModal({
     assets,
     generating,
     imageModelReady,
+    imageModelReason,
     onSavePrompt,
     onSaveReferences,
     onGenerate,
@@ -1447,6 +1458,7 @@ function ShotWorkbenchModal({
     assets: Asset[];
     generating: boolean;
     imageModelReady: boolean;
+    imageModelReason: string;
     onSavePrompt: (shotId: string, prompt: string) => void;
     onSaveReferences: (shotId: string, references: StudioShotReferences) => void;
     onGenerate: (shotId: string, prompt: string, references: StudioShotReferences, count: 1 | 2 | 4, allowNoReferences: boolean) => void;
@@ -1592,7 +1604,7 @@ function ShotWorkbenchModal({
                             允许无参考生成
                         </Checkbox>
                         {!style ? <p className="mt-2 text-xs text-[#ffa94d]">请先保存 Style 定调后再生成。</p> : null}
-                        {!imageModelReady ? <p className="mt-2 text-xs text-[#ffa94d]">请先配置可用的图像模型。</p> : null}
+                        {!imageModelReady ? <p className="mt-2 text-xs text-[#ffa94d]">{imageModelReason || "请先配置可用的图像模型。"}</p> : null}
                         {!readyReferences.length && !allowNoReferences ? <p className="mt-2 text-xs text-[#ffa94d]">默认必须基于 Cast selected reference images；无参考生成需要显式勾选。</p> : null}
                     </section>
 

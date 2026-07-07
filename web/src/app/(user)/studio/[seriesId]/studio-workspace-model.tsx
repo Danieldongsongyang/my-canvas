@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { BookOpen, Clapperboard, Film, Palette, Users } from "lucide-react";
 
+import { selectEffectiveModel, type ModelSelection } from "@/lib/model-selection";
 import type { StudioAssetRef, StudioEpisode, StudioSeries } from "@/services/studio-local";
 import { readNormalizedShotReferences, resolveStudioShotReferences, type StudioShotMissingReference, type StudioShotReferenceChip } from "@/services/studio-shot-reference-resolver";
 import type { Asset } from "@/stores/use-asset-store";
-import type { AiConfig } from "@/stores/use-config-store";
+import type { AiConfig, ModelCapability } from "@/stores/use-config-store";
 
 export type StudioPipelineStep = {
     id: "script" | "art_direction" | "cast" | "storyboard_r2v" | "assembly";
@@ -87,7 +88,9 @@ export type StudioModelSummaryItem = {
     key: StudioModelPreferenceKey;
     label: string;
     value: string;
-    source: "project" | "global" | "missing";
+    source: ModelSelection["source"];
+    ready: boolean;
+    reason: string;
 };
 
 export const FOLLOW_GLOBAL_MODEL_VALUE = "__studio_follow_global__";
@@ -97,6 +100,12 @@ const STUDIO_MODEL_LABELS: Record<StudioModelPreferenceKey, string> = {
     imageModel: "图像",
     videoModel: "视频",
 };
+
+const STUDIO_MODEL_SUMMARY_FIELDS: Array<{ key: StudioModelPreferenceKey; capability: ModelCapability }> = [
+    { key: "textModel", capability: "text" },
+    { key: "imageModel", capability: "image" },
+    { key: "videoModel", capability: "video" },
+];
 
 export const STUDIO_STYLE_PRESETS: StudioStylePreset[] = [
     {
@@ -147,12 +156,8 @@ export function buildStudioModelPreferencesPatch(input: Record<StudioModelPrefer
     };
 }
 
-export function buildStudioModelSummary(preferences: StudioSeries["modelPreferences"], config: AiConfig): StudioModelSummaryItem[] {
-    return [
-        buildStudioModelSummaryItem("textModel", preferences.textModel, config.textModel || config.model),
-        buildStudioModelSummaryItem("imageModel", preferences.imageModel, config.imageModel),
-        buildStudioModelSummaryItem("videoModel", preferences.videoModel, config.videoModel),
-    ];
+export function buildStudioModelSummary(preferences: StudioSeries["modelPreferences"], config: AiConfig, remoteModelsError = ""): StudioModelSummaryItem[] {
+    return STUDIO_MODEL_SUMMARY_FIELDS.map(({ key, capability }) => buildStudioModelSummaryItem(key, selectEffectiveModel({ config, capability, studioPreferences: preferences, remoteModelsError })));
 }
 
 export function buildStudioPipelineSteps(episode: StudioEpisode): StudioPipelineStep[] {
@@ -306,11 +311,15 @@ function cleanModelPreference(value: string) {
     return normalized && normalized !== FOLLOW_GLOBAL_MODEL_VALUE ? normalized : undefined;
 }
 
-function buildStudioModelSummaryItem(key: StudioModelPreferenceKey, preference: string | undefined, globalModel: string): StudioModelSummaryItem {
-    const projectModel = preference?.trim();
-    if (projectModel) return { key, label: STUDIO_MODEL_LABELS[key], value: projectModel, source: "project" };
-    const fallback = globalModel.trim();
-    return { key, label: STUDIO_MODEL_LABELS[key], value: fallback || "未配置", source: fallback ? "global" : "missing" };
+function buildStudioModelSummaryItem(key: StudioModelPreferenceKey, selection: ModelSelection): StudioModelSummaryItem {
+    return {
+        key,
+        label: STUDIO_MODEL_LABELS[key],
+        value: selection.model || "未配置",
+        source: selection.source,
+        ready: selection.ready,
+        reason: selection.reason,
+    };
 }
 
 function buildCastItem(item: { id: string; name: string; description: string; prompt?: string; assetRefs: StudioAssetRef[]; generation?: Record<string, unknown> }, kind: StudioCastItem["kind"], episode: StudioEpisode): StudioCastItem {

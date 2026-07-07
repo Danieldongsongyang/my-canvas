@@ -330,8 +330,7 @@ export async function generateCastReferences(input: GenerateCastReferencesInput)
 
     const artDirection = readStudioArtDirection(currentEpisode);
     if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
-    const model = currentSeries.modelPreferences.imageModel || input.config.imageModel;
-    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+    const model = requireImageGenerationModel(input.config);
 
     let series = currentSeries;
     let episode = currentEpisode;
@@ -544,8 +543,7 @@ export async function generateStoryboardShotImages(input: GenerateStoryboardShot
 
     const artDirection = readStudioArtDirection(episode);
     if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
-    const model = series.modelPreferences.imageModel || input.config.imageModel;
-    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+    const model = requireImageGenerationModel(input.config);
 
     const snapshot = buildStoryboardGenerationSnapshot({ shot, artDirection, model, count: input.count, createdAt: now() });
     const referenceImages = resolveStudioShotReferences({ episode, shot, assets: input.assets }).referenceImages;
@@ -649,8 +647,7 @@ export async function generateMissingStoryboardShotImages(input: GenerateMissing
     if (!currentSeries || !currentEpisode) throw new StudioGenerationError("Studio 剧集不存在。");
     const artDirection = readStudioArtDirection(currentEpisode);
     if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
-    const model = currentSeries.modelPreferences.imageModel || input.config.imageModel;
-    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+    const model = requireImageGenerationModel(input.config);
 
     let series = currentSeries;
     let episode = currentEpisode;
@@ -723,6 +720,12 @@ type StudioCastGenerationSnapshot = {
 };
 
 type StudioStoryboardGenerationSnapshot = StudioCastGenerationSnapshot;
+
+function requireImageGenerationModel(config: AiConfig) {
+    const model = config.imageModel || config.model;
+    if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
+    return model;
+}
 
 async function defaultRequestImages(config: AiConfig, prompt: string) {
     const { requestGeneration } = await import("@/services/api/image");

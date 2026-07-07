@@ -19,6 +19,7 @@ type CastWorkbenchModalProps = {
     assets: Asset[];
     generating: boolean;
     imageModelReady: boolean;
+    imageModelReason: string;
     onGenerate: (kind: StudioCastTargetKind, entityId: string, prompt: string, count: 1 | 2 | 4) => void;
     onSavePrompt: (kind: StudioCastTargetKind, entityId: string, prompt: string) => void;
     onSelectReference: (kind: StudioCastTargetKind, entityId: string, assetId: string) => void;
@@ -27,7 +28,7 @@ type CastWorkbenchModalProps = {
     onClose: () => void;
 };
 
-export function CastWorkbenchModal({ open, kind, entityId, episode, assets, generating, imageModelReady, onGenerate, onSavePrompt, onSelectReference, onRemoveCandidate, onAddLibraryAsset, onClose }: CastWorkbenchModalProps) {
+export function CastWorkbenchModal({ open, kind, entityId, episode, assets, generating, imageModelReady, imageModelReason, onGenerate, onSavePrompt, onSelectReference, onRemoveCandidate, onAddLibraryAsset, onClose }: CastWorkbenchModalProps) {
     const entity = useMemo(() => (kind && entityId ? findCastEntity(episode, kind, entityId) : null), [episode, entityId, kind]);
     const style = readArtDirectionDraft(episode);
     const [prompt, setPrompt] = useState("");
@@ -160,7 +161,7 @@ export function CastWorkbenchModal({ open, kind, entityId, episode, assets, gene
                             </Button>
                         </div>
                         {!style ? <p className="mt-2 text-xs text-[#ffa94d]">请先保存 Style 定调后再生成。</p> : null}
-                        {!imageModelReady ? <p className="mt-2 text-xs text-[#ffa94d]">请先配置可用的图像模型。</p> : null}
+                        {!imageModelReady ? <p className="mt-2 text-xs text-[#ffa94d]">{imageModelReason || "请先配置可用的图像模型。"}</p> : null}
                     </section>
 
                     <aside className="min-h-0 overflow-y-auto border-t border-[rgba(255,255,255,0.06)] bg-[#181620]/70 p-5 xl:border-l xl:border-t-0">
