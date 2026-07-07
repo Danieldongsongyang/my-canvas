@@ -11,7 +11,7 @@ import {
     normalizeArtDirectionDraft,
     STUDIO_STYLE_PRESETS,
 } from "./studio-workspace-model";
-import type { AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, resolveConfigWithModels, type AiConfig } from "@/stores/use-config-store";
 import type { StudioEpisode } from "@/services/studio-local";
 
 function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
@@ -48,18 +48,48 @@ describe("studio workspace model", () => {
     });
 
     it("summarizes Studio model preferences with global fallbacks", () => {
-        const config = {
-            model: "gpt-5",
-            textModel: "gpt-5.5",
-            imageModel: "seedream-4",
-            videoModel: "sora-1",
-        } as AiConfig;
+        const config = resolveConfigWithModels(
+            {
+                ...defaultConfig,
+                model: "gpt-5",
+                textModel: "gpt-5.5",
+                imageModel: "seedream-4",
+                videoModel: "sora-1",
+            } as AiConfig,
+            ["gpt-5.5", "claude-sonnet-5", "seedream-4", "sora-1", "kling-v3"],
+        );
 
         expect(buildStudioModelSummary({ textModel: "claude-sonnet-5", imageModel: "", videoModel: "kling-v3" }, config)).toEqual([
-            { key: "textModel", label: "文本", value: "claude-sonnet-5", source: "project" },
-            { key: "imageModel", label: "图像", value: "seedream-4", source: "global" },
-            { key: "videoModel", label: "视频", value: "kling-v3", source: "project" },
+            { key: "textModel", label: "文本", value: "claude-sonnet-5", source: "project", ready: true, reason: "" },
+            { key: "imageModel", label: "图像", value: "seedream-4", source: "global", ready: true, reason: "" },
+            { key: "videoModel", label: "视频", value: "kling-v3", source: "project", ready: true, reason: "" },
         ]);
+    });
+
+    it("summarizes unavailable Studio model preferences with the fallback reason", () => {
+        const config = resolveConfigWithModels({ ...defaultConfig, imageModel: "seedream-4" }, ["seedream-4"]);
+
+        expect(buildStudioModelSummary({ imageModel: "removed-image-model" }, config).find((item) => item.key === "imageModel")).toEqual({
+            key: "imageModel",
+            label: "图像",
+            value: "seedream-4",
+            source: "global",
+            ready: true,
+            reason: "项目偏好模型 removed-image-model 当前不可用，已使用全局模型。",
+        });
+    });
+
+    it("summarizes missing Studio model selections with user-facing reasons", () => {
+        const config = resolveConfigWithModels(defaultConfig, ["gpt-5.5"]);
+
+        expect(buildStudioModelSummary({ imageModel: "removed-image-model" }, config).find((item) => item.key === "imageModel")).toEqual({
+            key: "imageModel",
+            label: "图像",
+            value: "未配置",
+            source: "missing",
+            ready: false,
+            reason: "项目偏好模型 removed-image-model 当前不可用，且没有可用的图像模型。",
+        });
     });
 
     it("uses the LumenX unified R2V step order for the Studio rail", () => {

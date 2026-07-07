@@ -418,6 +418,48 @@ describe("studio generation adapter", () => {
         });
     });
 
+    it("uses the caller-resolved image model instead of reapplying stored Studio preferences", async () => {
+        const repository = createStudioRepository(createInMemoryStudioStorage());
+        const created = await repository.createSeries({ title: "山海便利店" });
+        await repository.updateSeries(created.id, { modelPreferences: { imageModel: "removed-project-image-model" } });
+        const episode = created.episodes[0];
+        await repository.updateEpisode(created.id, episode.id, {
+            characters: [{ id: "char-1", name: "阿岚", description: "夜班店员", prompt: "阿岚角色参考图", assetRefs: [] }],
+            generation: {
+                artDirection: {
+                    status: "completed",
+                    name: "雨夜霓虹电影感",
+                    positivePrompt: "cinematic neon noir",
+                    negativePrompt: "",
+                    savedAt: "2026-07-01T08:30:00.000Z",
+                },
+            },
+        });
+        const requestImages = vi.fn(async () => [{ id: "image-1", dataUrl: "data:image/png;base64,AAA" }]);
+        const storeImage = vi.fn(async () => ({
+            url: "blob:studio-cast-1",
+            storageKey: "image:studio-cast-1",
+            width: 1024,
+            height: 1536,
+            bytes: 1234,
+            mimeType: "image/png",
+        }));
+
+        await generateCastReferences({
+            repository,
+            seriesId: created.id,
+            episodeId: episode.id,
+            config: { ...config, model: "seedream-4", imageModel: "seedream-4" },
+            target: { mode: "allMissing" },
+            count: 1,
+            requestImages,
+            storeImage,
+            addAsset: vi.fn(() => "asset-1"),
+        });
+
+        expect(requestImages).toHaveBeenCalledWith(expect.objectContaining({ model: "seedream-4", imageModel: "seedream-4" }), expect.any(String));
+    });
+
     it("skips existing selected refs and preserves successful targets when another Cast target fails", async () => {
         const repository = createStudioRepository(createInMemoryStudioStorage());
         const series = await repository.createSeries({ title: "山海便利店" });

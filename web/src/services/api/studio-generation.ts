@@ -329,7 +329,7 @@ export async function generateCastReferences(input: GenerateCastReferencesInput)
 
     const artDirection = readStudioArtDirection(currentEpisode);
     if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
-    const model = currentSeries.modelPreferences.imageModel || input.config.imageModel;
+    const model = input.config.imageModel || input.config.model;
     if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
 
     let series = currentSeries;
@@ -543,7 +543,7 @@ export async function generateStoryboardShotImages(input: GenerateStoryboardShot
 
     const artDirection = readStudioArtDirection(episode);
     if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
-    const model = series.modelPreferences.imageModel || input.config.imageModel;
+    const model = input.config.imageModel || input.config.model;
     if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
 
     const snapshot = buildStoryboardGenerationSnapshot({ shot, artDirection, model, count: input.count, createdAt: now() });
@@ -648,7 +648,7 @@ export async function generateMissingStoryboardShotImages(input: GenerateMissing
     if (!currentSeries || !currentEpisode) throw new StudioGenerationError("Studio 剧集不存在。");
     const artDirection = readStudioArtDirection(currentEpisode);
     if (!artDirection?.positivePrompt) throw new StudioGenerationError("请先保存 Style 定调。");
-    const model = currentSeries.modelPreferences.imageModel || input.config.imageModel;
+    const model = input.config.imageModel || input.config.model;
     if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
 
     let series = currentSeries;
