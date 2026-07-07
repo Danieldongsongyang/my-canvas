@@ -1,4 +1,154 @@
-import type { CanvasConnection, CanvasNodeData, ContextMenuState } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ContextMenuState, type Position } from "../types";
+
+export type CanvasUploadUiState = {
+    selectedNodeIds: Set<string>;
+    selectedConnectionId: string | null;
+    dialogNodeId: string | null;
+};
+
+export type CanvasUploadedMediaNodeType = CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio;
+
+export type CanvasUploadedMediaPayload = {
+    type: CanvasUploadedMediaNodeType;
+    title: string;
+    width: number;
+    height: number;
+    metadata: CanvasNodeMetadata;
+};
+
+export type CanvasUploadedMediaCreatePayload = CanvasUploadedMediaPayload & {
+    mode: "create";
+    position: Position;
+    createId?: () => string;
+};
+
+export type CanvasUploadedMediaReplacePayload = CanvasUploadedMediaPayload & {
+    mode: "replace";
+    nodeId: string;
+};
+
+export type CanvasUploadedMediaMutationInput = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    upload: CanvasUploadedMediaCreatePayload | CanvasUploadedMediaReplacePayload;
+    uiState?: CanvasUploadUiState;
+};
+
+export type CanvasUploadedMediaMutationResult = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    nodeId: string | null;
+    uiState: CanvasUploadUiState;
+};
+
+export function applyUploadedMediaToCanvasGraph({ nodes, connections, upload, uiState }: CanvasUploadedMediaMutationInput): CanvasUploadedMediaMutationResult {
+    if (upload.mode === "replace") {
+        const target = nodes.find((node) => node.id === upload.nodeId);
+        if (!target) {
+            return {
+                nodes,
+                connections,
+                nodeId: null,
+                uiState: uiState || emptyUploadUiState(),
+            };
+        }
+
+        const nextNode = replaceNodeWithUploadedMedia(target, upload);
+        return {
+            nodes: nodes.map((node) => (node.id === upload.nodeId ? nextNode : node)),
+            connections,
+            nodeId: upload.nodeId,
+            uiState: selectedUploadUiState(upload.nodeId, upload.type),
+        };
+    }
+
+    const id = upload.createId?.() || createUploadedMediaNodeId(upload.type);
+    const newNode: CanvasNodeData = {
+        id,
+        type: upload.type,
+        title: upload.title,
+        position: {
+            x: upload.position.x - upload.width / 2,
+            y: upload.position.y - upload.height / 2,
+        },
+        width: upload.width,
+        height: upload.height,
+        metadata: upload.metadata,
+    };
+
+    return {
+        nodes: [...nodes, newNode],
+        connections,
+        nodeId: id,
+        uiState: selectedUploadUiState(id, upload.type),
+    };
+}
+
+function replaceNodeWithUploadedMedia(node: CanvasNodeData, upload: CanvasUploadedMediaReplacePayload): CanvasNodeData {
+    const nextPosition =
+        upload.type === CanvasNodeType.Image
+            ? node.position
+            : {
+                  x: node.position.x + node.width / 2 - upload.width / 2,
+                  y: node.position.y + node.height / 2 - upload.height / 2,
+              };
+
+    return {
+        ...node,
+        type: upload.type,
+        title: upload.title,
+        position: nextPosition,
+        width: upload.width,
+        height: upload.height,
+        metadata: cleanUploadedMediaMetadata(node.metadata, upload.metadata, upload.type),
+    };
+}
+
+function cleanUploadedMediaMetadata(current: CanvasNodeMetadata | undefined, uploaded: CanvasNodeMetadata, type: CanvasUploadedMediaNodeType): CanvasNodeMetadata {
+    if (type !== CanvasNodeType.Image) {
+        const { errorDetails: _errorDetails, ...rest } = current || {};
+        return { ...rest, ...uploaded };
+    }
+
+    const {
+        errorDetails: _errorDetails,
+        isBatchRoot: _isBatchRoot,
+        batchRootId: _batchRootId,
+        batchChildIds: _batchChildIds,
+        batchUsesReferenceImages: _batchUsesReferenceImages,
+        generationType: _generationType,
+        model: _model,
+        size: _size,
+        quality: _quality,
+        count: _count,
+        references: _references,
+        primaryImageId: _primaryImageId,
+        imageBatchExpanded: _imageBatchExpanded,
+        ...rest
+    } = current || {};
+
+    return { ...rest, ...uploaded, freeResize: false };
+}
+
+function selectedUploadUiState(nodeId: string, type: CanvasUploadedMediaNodeType): CanvasUploadUiState {
+    return {
+        selectedNodeIds: new Set([nodeId]),
+        selectedConnectionId: null,
+        dialogNodeId: type === CanvasNodeType.Audio ? null : nodeId,
+    };
+}
+
+function emptyUploadUiState(): CanvasUploadUiState {
+    return {
+        selectedNodeIds: new Set(),
+        selectedConnectionId: null,
+        dialogNodeId: null,
+    };
+}
+
+function createUploadedMediaNodeId(type: CanvasUploadedMediaNodeType) {
+    return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
 
 export type CanvasDeletionUiState = {
     selectedNodeIds: Set<string>;

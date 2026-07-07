@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deleteCanvasNodesFromGraph, type CanvasDeletionUiState } from "./canvas-graph-mutations";
+import { applyUploadedMediaToCanvasGraph, deleteCanvasNodesFromGraph, type CanvasDeletionUiState } from "./canvas-graph-mutations";
 import { CanvasNodeType, type CanvasNodeData } from "../types";
 
 function node(id: string, metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
@@ -38,6 +38,115 @@ function deletionUiState(overrides: Partial<CanvasDeletionUiState> = {}): Canvas
 }
 
 describe("canvas graph mutations", () => {
+    it("creates uploaded media nodes and returns the expected selection and dialog state", () => {
+        const imageResult = applyUploadedMediaToCanvasGraph({
+            nodes: [],
+            connections: [],
+            upload: {
+                mode: "create",
+                type: CanvasNodeType.Image,
+                title: "reference.png",
+                position: { x: 500, y: 320 },
+                width: 300,
+                height: 180,
+                metadata: { content: "image:url", status: "success" },
+                createId: () => "image-upload",
+            },
+        });
+        const videoResult = applyUploadedMediaToCanvasGraph({
+            nodes: [],
+            connections: [],
+            upload: {
+                mode: "create",
+                type: CanvasNodeType.Video,
+                title: "clip.mp4",
+                position: { x: 200, y: 160 },
+                width: 420,
+                height: 236,
+                metadata: { content: "video:url", status: "success" },
+                createId: () => "video-upload",
+            },
+        });
+        const audioResult = applyUploadedMediaToCanvasGraph({
+            nodes: [],
+            connections: [],
+            upload: {
+                mode: "create",
+                type: CanvasNodeType.Audio,
+                title: "voice.mp3",
+                position: { x: 180, y: 120 },
+                width: 340,
+                height: 120,
+                metadata: { content: "audio:url", status: "success" },
+                createId: () => "audio-upload",
+            },
+        });
+
+        expect(imageResult.nodes[0]).toMatchObject({
+            id: "image-upload",
+            type: CanvasNodeType.Image,
+            title: "reference.png",
+            position: { x: 350, y: 230 },
+            width: 300,
+            height: 180,
+            metadata: { content: "image:url", status: "success" },
+        });
+        expect(videoResult.nodes[0]).toMatchObject({ id: "video-upload", type: CanvasNodeType.Video, position: { x: -10, y: 42 } });
+        expect(audioResult.nodes[0]).toMatchObject({ id: "audio-upload", type: CanvasNodeType.Audio, position: { x: 10, y: 60 } });
+        expect(imageResult.uiState).toMatchObject({ selectedConnectionId: null, dialogNodeId: "image-upload" });
+        expect(videoResult.uiState).toMatchObject({ selectedConnectionId: null, dialogNodeId: "video-upload" });
+        expect(audioResult.uiState).toMatchObject({ selectedConnectionId: null, dialogNodeId: null });
+        expect(imageResult.uiState.selectedNodeIds).toEqual(new Set(["image-upload"]));
+        expect(videoResult.uiState.selectedNodeIds).toEqual(new Set(["video-upload"]));
+        expect(audioResult.uiState.selectedNodeIds).toEqual(new Set(["audio-upload"]));
+    });
+
+    it("replaces an existing upload target without dropping graph connections", () => {
+        const result = applyUploadedMediaToCanvasGraph({
+            nodes: [
+                node("source"),
+                node("target", {
+                    content: "",
+                    status: "error",
+                    errorDetails: "生成失败",
+                    isBatchRoot: true,
+                    batchChildIds: ["stale-child"],
+                    generationType: "edit",
+                    references: ["image:old"],
+                }),
+            ],
+            connections: [{ id: "conn-source-target", fromNodeId: "source", toNodeId: "target" }],
+            upload: {
+                mode: "replace",
+                nodeId: "target",
+                type: CanvasNodeType.Image,
+                title: "replacement.png",
+                width: 260,
+                height: 200,
+                metadata: { content: "image:new", status: "success", naturalWidth: 1024, naturalHeight: 768 },
+            },
+            uiState: { selectedNodeIds: new Set(["source"]), selectedConnectionId: "conn-source-target", dialogNodeId: "source" },
+        });
+
+        expect(result.nodes).toHaveLength(2);
+        expect(result.connections).toEqual([{ id: "conn-source-target", fromNodeId: "source", toNodeId: "target" }]);
+        expect(result.nodes[1]).toMatchObject({
+            id: "target",
+            type: CanvasNodeType.Image,
+            title: "replacement.png",
+            width: 260,
+            height: 200,
+            metadata: { content: "image:new", status: "success", naturalWidth: 1024, naturalHeight: 768 },
+        });
+        expect(result.nodes[1].metadata).not.toHaveProperty("errorDetails");
+        expect(result.nodes[1].metadata).not.toHaveProperty("isBatchRoot");
+        expect(result.nodes[1].metadata).not.toHaveProperty("batchChildIds");
+        expect(result.nodes[1].metadata).not.toHaveProperty("generationType");
+        expect(result.nodes[1].metadata).not.toHaveProperty("references");
+        expect(result.uiState.selectedNodeIds).toEqual(new Set(["target"]));
+        expect(result.uiState).toMatchObject({ selectedConnectionId: null, dialogNodeId: "target" });
+    });
+
     it("deletes a normal node and clears related connections and transient UI references", () => {
         const result = deleteCanvasNodesFromGraph({
             nodes: [node("a"), node("b"), node("c")],

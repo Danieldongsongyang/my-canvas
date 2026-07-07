@@ -8,6 +8,7 @@ import type { AiConfig } from "@/stores/use-config-store";
 
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../../constants";
 import { CanvasNodeType, type CanvasConnection, type CanvasImageWorkflowAction, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "../../types";
+import { applyUploadedMediaToCanvasGraph } from "../../utils/canvas-graph-mutations";
 import { audioMetadata, isAudioFile, imageMetadata, videoMetadata, VIDEO_NODE_MAX_HEIGHT, VIDEO_NODE_MAX_WIDTH } from "../canvas-page-utils";
 import { fitNodeSize } from "../../utils/canvas-node-size";
 
@@ -45,67 +46,66 @@ export function useCanvasFileNodes({
     message,
 }: UseCanvasFileNodesParams) {
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position; workflow?: CanvasImageWorkflowAction } | null>(null);
+    type UploadedMediaGraphPayload = Parameters<typeof applyUploadedMediaToCanvasGraph>[0]["upload"];
+
+    const applyUploadedMediaMutation = useCallback((upload: UploadedMediaGraphPayload) => {
+        const result = applyUploadedMediaToCanvasGraph({
+            nodes: nodesRef.current,
+            connections: connectionsRef.current,
+            upload,
+        });
+
+        if (!result.nodeId) return;
+        nodesRef.current = result.nodes;
+        connectionsRef.current = result.connections;
+        setNodes(result.nodes);
+        setConnections(result.connections);
+        setSelectedNodeIds(result.uiState.selectedNodeIds);
+        setSelectedConnectionId(result.uiState.selectedConnectionId);
+        setDialogNodeId(result.uiState.dialogNodeId);
+    }, [connectionsRef, nodesRef, setConnections, setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds]);
 
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
         const image = await uploadImage(file);
         const imageSize = fitNodeSize(image.width, image.height);
-        const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const newNode: CanvasNodeData = {
-            id,
+        applyUploadedMediaMutation({
+            mode: "create",
             type: CanvasNodeType.Image,
             title: file.name,
-            position: { x: position.x - imageSize.width / 2, y: position.y - imageSize.height / 2 },
+            position,
             width: imageSize.width,
             height: imageSize.height,
             metadata: imageMetadata(image),
-        };
-
-        setNodes((prev) => [...prev, newNode]);
-        setSelectedNodeIds(new Set([id]));
-        setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, [setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds]);
+        });
+    }, [applyUploadedMediaMutation]);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position) => {
         const video = await uploadMediaFile(file, "video");
         const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-        const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setNodes((prev) => [
-            ...prev,
-            {
-                id,
-                type: CanvasNodeType.Video,
-                title: file.name,
-                position: { x: position.x - nextSize.width / 2, y: position.y - nextSize.height / 2 },
-                width: nextSize.width,
-                height: nextSize.height,
-                metadata: videoMetadata(video),
-            },
-        ]);
-        setSelectedNodeIds(new Set([id]));
-        setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, [setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds]);
+        applyUploadedMediaMutation({
+            mode: "create",
+            type: CanvasNodeType.Video,
+            title: file.name,
+            position,
+            width: nextSize.width,
+            height: nextSize.height,
+            metadata: videoMetadata(video),
+        });
+    }, [applyUploadedMediaMutation]);
 
     const createAudioFileNode = useCallback(async (file: File, position: Position) => {
         const audio = await uploadMediaFile(file, "audio");
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-        const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        setNodes((prev) => [
-            ...prev,
-            {
-                id,
-                type: CanvasNodeType.Audio,
-                title: file.name,
-                position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
-                width: spec.width,
-                height: spec.height,
-                metadata: audioMetadata(audio),
-            },
-        ]);
-        setSelectedNodeIds(new Set([id]));
-        setSelectedConnectionId(null);
-    }, [setNodes, setSelectedConnectionId, setSelectedNodeIds]);
+        applyUploadedMediaMutation({
+            mode: "create",
+            type: CanvasNodeType.Audio,
+            title: file.name,
+            position,
+            width: spec.width,
+            height: spec.height,
+            metadata: audioMetadata(audio),
+        });
+    }, [applyUploadedMediaMutation]);
 
     const handleUploadRequest = useCallback((nodeId?: string, position?: Position, workflow?: CanvasImageWorkflowAction) => {
         uploadTargetRef.current = { nodeId, position, workflow };
@@ -143,23 +143,15 @@ export function useCanvasFileNodes({
                 if (isAudioFile(file)) {
                     const audio = await uploadMediaFile(file, "audio");
                     const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === target.nodeId
-                                ? {
-                                      ...node,
-                                      type: CanvasNodeType.Audio,
-                                      title: file.name,
-                                      position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 },
-                                      width: spec.width,
-                                      height: spec.height,
-                                      metadata: { ...node.metadata, ...audioMetadata(audio), errorDetails: undefined },
-                                  }
-                                : node,
-                        ),
-                    );
-                    setSelectedNodeIds(new Set([target.nodeId]));
-                    setSelectedConnectionId(null);
+                    applyUploadedMediaMutation({
+                        mode: "replace",
+                        nodeId: target.nodeId,
+                        type: CanvasNodeType.Audio,
+                        title: file.name,
+                        width: spec.width,
+                        height: spec.height,
+                        metadata: audioMetadata(audio),
+                    });
                     uploadTargetRef.current = null;
                     event.target.value = "";
                     return;
@@ -167,64 +159,30 @@ export function useCanvasFileNodes({
                 if (file.type.startsWith("video/")) {
                     const video = await uploadMediaFile(file, "video");
                     const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === target.nodeId
-                                ? {
-                                      ...node,
-                                      type: CanvasNodeType.Video,
-                                      title: file.name,
-                                      position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
-                                      width: nextSize.width,
-                                      height: nextSize.height,
-                                      metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined },
-                                  }
-                                : node,
-                        ),
-                    );
-                    setSelectedNodeIds(new Set([target.nodeId]));
-                    setSelectedConnectionId(null);
-                    setDialogNodeId(target.nodeId);
+                    applyUploadedMediaMutation({
+                        mode: "replace",
+                        nodeId: target.nodeId,
+                        type: CanvasNodeType.Video,
+                        title: file.name,
+                        width: nextSize.width,
+                        height: nextSize.height,
+                        metadata: videoMetadata(video),
+                    });
                     uploadTargetRef.current = null;
                     event.target.value = "";
                     return;
                 }
                 const image = await uploadImage(file);
                 const imageSize = fitNodeSize(image.width, image.height);
-                setNodes((prev) =>
-                    prev.map((node) =>
-                        node.id === target.nodeId
-                            ? {
-                                  ...node,
-                                  type: CanvasNodeType.Image,
-                                  title: file.name,
-                                  width: imageSize.width,
-                                  height: imageSize.height,
-                                  metadata: {
-                                      ...node.metadata,
-                                      ...imageMetadata(image),
-                                      errorDetails: undefined,
-                                      freeResize: false,
-                                      isBatchRoot: undefined,
-                                      batchRootId: undefined,
-                                      batchChildIds: undefined,
-                                      batchUsesReferenceImages: undefined,
-                                      generationType: undefined,
-                                      model: undefined,
-                                      size: undefined,
-                                      quality: undefined,
-                                      count: undefined,
-                                      references: undefined,
-                                      primaryImageId: undefined,
-                                      imageBatchExpanded: undefined,
-                                  },
-                              }
-                            : node,
-                    ),
-                );
-                setSelectedNodeIds(new Set([target.nodeId]));
-                setSelectedConnectionId(null);
-                setDialogNodeId(target.nodeId);
+                applyUploadedMediaMutation({
+                    mode: "replace",
+                    nodeId: target.nodeId,
+                    type: CanvasNodeType.Image,
+                    title: file.name,
+                    width: imageSize.width,
+                    height: imageSize.height,
+                    metadata: imageMetadata(image),
+                });
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
@@ -233,7 +191,7 @@ export function useCanvasFileNodes({
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [connectionsRef, containerRef, createAudioFileNode, createImageFileNode, createVideoFileNode, effectiveConfig, nodesRef, screenToCanvas, setConnections, setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds, size.height, size.width],
+        [connectionsRef, containerRef, createAudioFileNode, createImageFileNode, createVideoFileNode, effectiveConfig, nodesRef, screenToCanvas, setConnections, setDialogNodeId, setNodes, setSelectedConnectionId, setSelectedNodeIds, size.height, size.width, applyUploadedMediaMutation],
     );
 
     const handleDrop = useCallback(
