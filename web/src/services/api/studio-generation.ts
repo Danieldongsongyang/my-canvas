@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { aiApiUrl, aiRequestHeaders, refreshRemoteUser } from "@/services/api/ai-request";
 import type { StudioAssetRef, StudioEpisodePatch, StudioShot, StudioShotReferences, StudioCharacter, StudioProp, StudioScene, createStudioRepository, StudioEpisode, StudioSeries } from "@/services/studio-local";
+import { resolveStudioShotReferences } from "@/services/studio-shot-reference-resolver";
 import type { Asset } from "@/stores/use-asset-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -513,7 +514,7 @@ export async function updateShotReferences(input: UpdateShotReferencesInput): Pr
     if (!series || !episode) throw new StudioGenerationError("Studio 剧集不存在。");
     const shot = episode.shots.find((item) => item.id === input.shotId);
     if (!shot) throw new StudioGenerationError("镜头不存在。");
-    const references = normalizeShotReferences(input.references, episode);
+    const references = validateShotReferences(input.references, episode);
 
     return input.repository.updateEpisode(input.seriesId, input.episodeId, {
         shots: episode.shots.map((item) =>
@@ -547,7 +548,8 @@ export async function generateStoryboardShotImages(input: GenerateStoryboardShot
     if (!model.trim()) throw new StudioGenerationError("请先配置可用的图像模型。");
 
     const snapshot = buildStoryboardGenerationSnapshot({ shot, artDirection, model, count: input.count, createdAt: now() });
-    const references = collectStoryboardReferenceImages(episode, shot, input.assets);
+    const resolvedReferences = resolveStudioShotReferences({ episode, shot, assets: input.assets });
+    const references = resolvedReferences.referenceImages;
     if (!references.length && !input.allowNoReferences) throw new StudioGenerationError("缺少 Cast selected reference images。请先补齐显式引用和主参考图，或明确允许无参考生成。");
 
     const images = references.length
@@ -658,13 +660,12 @@ export async function generateMissingStoryboardShotImages(input: GenerateMissing
     for (const target of selectStoryboardShotTargets(episode, input.target)) {
         const shot = episode.shots.find((item) => item.id === target.id);
         if (!shot) continue;
-        const referenceCount = countShotReferences(shot);
-        const readyReferenceCount = collectStoryboardReferenceImages(episode, shot, input.assets).length;
-        if (!referenceCount) {
+        const resolvedReferences = resolveStudioShotReferences({ episode, shot, assets: input.assets });
+        if (!resolvedReferences.referenceCount) {
             results.push({ shotId: shot.id, title: shot.title, status: "skipped", createdAssetIds: [], reason: "no-explicit-references" });
             continue;
         }
-        if (readyReferenceCount < referenceCount) {
+        if (resolvedReferences.readyCount < resolvedReferences.referenceCount) {
             results.push({ shotId: shot.id, title: shot.title, status: "skipped", createdAssetIds: [], reason: "missing-reference-images" });
             continue;
         }
@@ -805,7 +806,7 @@ function patchEpisodeCastEntity(episode: StudioEpisode, kind: StudioCastTargetKi
     return { props: episode.props.map((item) => (item.id === entity.id ? (entity as StudioProp) : item)) };
 }
 
-function normalizeShotReferences(references: StudioShotReferences, episode: StudioEpisode): StudioShotReferences {
+function validateShotReferences(references: StudioShotReferences, episode: StudioEpisode): StudioShotReferences {
     return {
         characterIds: normalizeExistingIds(references.characterIds, episode.characters, "镜头引用包含不存在的角色"),
         sceneIds: normalizeExistingIds(references.sceneIds, episode.scenes, "镜头引用包含不存在的场景"),
@@ -862,40 +863,6 @@ function readShotPrompt(shot: StudioShot) {
 
 function buildShotPromptFallback(shot: Pick<StudioShot, "description" | "dialogue">) {
     return [shot.description.trim(), shot.dialogue?.trim() ? `对白：${shot.dialogue.trim()}` : ""].filter(Boolean).join("\n");
-}
-
-function readShotReferences(shot: StudioShot): StudioShotReferences {
-    return {
-        characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
-        sceneIds: Array.isArray(shot.metadata?.references?.sceneIds) ? shot.metadata.references.sceneIds : [],
-        propIds: Array.isArray(shot.metadata?.references?.propIds) ? shot.metadata.references.propIds : [],
-    };
-}
-
-function countShotReferences(shot: StudioShot) {
-    const references = readShotReferences(shot);
-    return references.characterIds.length + references.sceneIds.length + references.propIds.length;
-}
-
-function collectStoryboardReferenceImages(episode: StudioEpisode, shot: StudioShot, assets: Asset[]): ReferenceImage[] {
-    const assetMap = new Map(assets.filter((asset) => asset.kind === "image").map((asset) => [asset.id, asset]));
-    const refs = readShotReferences(shot);
-    const entities = [...episode.characters.filter((entity) => refs.characterIds.includes(entity.id)), ...episode.scenes.filter((entity) => refs.sceneIds.includes(entity.id)), ...episode.props.filter((entity) => refs.propIds.includes(entity.id))];
-    const images: ReferenceImage[] = [];
-    for (const entity of entities) {
-        const selected = getSelectedImageRef(entity);
-        const asset = selected ? assetMap.get(selected.assetId) : undefined;
-        if (!asset || asset.kind !== "image") continue;
-        images.push({
-            id: asset.id,
-            name: asset.title,
-            dataUrl: asset.data.dataUrl,
-            url: asset.data.dataUrl,
-            storageKey: asset.data.storageKey,
-            type: asset.data.mimeType,
-        });
-    }
-    return images;
 }
 
 async function markStoryboardShotImageFailed(input: { repository: StudioRepository; seriesId: string; episodeId: string; shotId: string; error: string }) {

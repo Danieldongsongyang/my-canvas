@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { BookOpen, Clapperboard, Film, Palette, Users } from "lucide-react";
 
 import type { StudioAssetRef, StudioEpisode, StudioSeries } from "@/services/studio-local";
+import { readNormalizedShotReferences, resolveStudioShotReferences, type StudioShotMissingReference, type StudioShotReferenceChip } from "@/services/studio-shot-reference-resolver";
+import type { Asset } from "@/stores/use-asset-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
 export type StudioPipelineStep = {
@@ -75,20 +77,9 @@ export type StudioStoryboardCard = {
     };
 };
 
-export type StudioStoryboardReferenceChip = {
-    kind: "character" | "scene" | "prop";
-    id: string;
-    label: string;
-    ready: boolean;
-    selectedAssetId?: string;
-};
+export type StudioStoryboardReferenceChip = StudioShotReferenceChip;
 
-export type StudioStoryboardMissingReferenceChip = {
-    kind: StudioStoryboardReferenceChip["kind"];
-    id: string;
-    label: string;
-    reason: "missing-selected-image" | "missing-entity";
-};
+export type StudioStoryboardMissingReferenceChip = StudioShotMissingReference;
 
 export type StudioModelPreferenceKey = keyof StudioSeries["modelPreferences"];
 
@@ -223,7 +214,7 @@ export function formatEpisodeStructure(episode: StudioEpisode | null) {
                     description: shot.description,
                     ...(shot.dialogue ? { dialogue: shot.dialogue } : {}),
                     prompt: shot.prompt || buildShotPromptFallback(shot),
-                    references: readShotReferences(shot),
+                    references: readNormalizedShotReferences(shot),
                 })) ?? [],
         },
         null,
@@ -282,24 +273,14 @@ export function buildCastSections(episode: StudioEpisode): StudioCastSection[] {
     ];
 }
 
-export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCard[] {
+export function buildStoryboardCards(episode: StudioEpisode, assets: Asset[] = []): StudioStoryboardCard[] {
     return [...episode.shots]
         .sort((a, b) => a.order - b.order)
         .map((shot) => {
             const prompt = shot.prompt?.trim() || buildShotPromptFallback(shot);
-            const references = readShotReferences(shot);
-            const referencedIds = [...references.characterIds, ...references.sceneIds, ...references.propIds];
+            const resolution = resolveStudioShotReferences({ episode, shot, assets });
             const selectedRef = getSelectedImageRef(shot.assetRefs);
             const generation = readShotImageGeneration(shot.generation);
-            const referenceChips = buildStoryboardReferenceChips(episode, references);
-            const missingReferenceChips = referenceChips
-                .filter((chip) => !chip.ready)
-                .map((chip) => ({
-                    kind: chip.kind,
-                    id: chip.id,
-                    label: chip.label,
-                    reason: chip.label ? ("missing-selected-image" as const) : ("missing-entity" as const),
-                }));
             return {
                 id: shot.id,
                 title: shot.title,
@@ -309,12 +290,12 @@ export function buildStoryboardCards(episode: StudioEpisode): StudioStoryboardCa
                 status: readShotStatus(Boolean(selectedRef), generation),
                 selectedAssetId: selectedRef?.assetId,
                 candidateCount: shot.assetRefs.filter((ref) => ref.role === "candidate" || ref.role === "selected").length,
-                referenceCount: referencedIds.length,
-                hasExplicitReferences: referencedIds.length > 0,
-                hasReadyReferences: referencedIds.length > 0 && referenceChips.length === referencedIds.length && referenceChips.every((chip) => chip.ready),
+                referenceCount: resolution.referenceCount,
+                hasExplicitReferences: resolution.hasExplicitReferences,
+                hasReadyReferences: resolution.hasReadyReferences,
                 lastError: generation.lastImageError,
-                referenceChips,
-                missingReferenceChips,
+                referenceChips: resolution.chips,
+                missingReferenceChips: resolution.missing,
                 generationSummary: readStoryboardGenerationSummary(selectedRef),
             };
         });
@@ -356,34 +337,6 @@ function buildCastItem(item: { id: string; name: string; description: string; pr
 
 function getSelectedImageRef(refs: StudioAssetRef[]) {
     return refs.find((ref) => ref.kind === "image" && ref.role === "selected");
-}
-
-function buildStoryboardReferenceChips(episode: StudioEpisode, references: ReturnType<typeof readShotReferences>): StudioStoryboardReferenceChip[] {
-    return [
-        ...references.characterIds.map((id) => buildStoryboardReferenceChip("character", id, episode.characters)),
-        ...references.sceneIds.map((id) => buildStoryboardReferenceChip("scene", id, episode.scenes)),
-        ...references.propIds.map((id) => buildStoryboardReferenceChip("prop", id, episode.props)),
-    ];
-}
-
-function buildStoryboardReferenceChip(kind: StudioStoryboardReferenceChip["kind"], id: string, entities: Array<{ id: string; name: string; assetRefs: StudioAssetRef[] }>): StudioStoryboardReferenceChip {
-    const entity = entities.find((item) => item.id === id);
-    const selectedRef = entity ? getSelectedImageRef(entity.assetRefs) : undefined;
-    return {
-        kind,
-        id,
-        label: entity?.name ?? id,
-        ready: Boolean(selectedRef),
-        selectedAssetId: selectedRef?.assetId,
-    };
-}
-
-function readShotReferences(shot: StudioEpisode["shots"][number]) {
-    return {
-        characterIds: Array.isArray(shot.metadata?.references?.characterIds) ? shot.metadata.references.characterIds : [],
-        sceneIds: Array.isArray(shot.metadata?.references?.sceneIds) ? shot.metadata.references.sceneIds : [],
-        propIds: Array.isArray(shot.metadata?.references?.propIds) ? shot.metadata.references.propIds : [],
-    };
 }
 
 function buildShotPromptFallback(shot: Pick<StudioEpisode["shots"][number], "description" | "dialogue">) {

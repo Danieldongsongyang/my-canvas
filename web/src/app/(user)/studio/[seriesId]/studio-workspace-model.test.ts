@@ -13,6 +13,7 @@ import {
 } from "./studio-workspace-model";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { StudioEpisode } from "@/services/studio-local";
+import type { Asset } from "@/stores/use-asset-store";
 
 function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
     return {
@@ -27,6 +28,20 @@ function episode(overrides: Partial<StudioEpisode> = {}): StudioEpisode {
         createdAt: "2026-07-01T08:00:00.000Z",
         updatedAt: "2026-07-01T08:00:00.000Z",
         ...overrides,
+    };
+}
+
+function imageAsset(id: string, title = id): Extract<Asset, { kind: "image" }> {
+    return {
+        id,
+        kind: "image",
+        title,
+        coverUrl: `blob:${id}`,
+        tags: [],
+        source: "Studio Cast",
+        data: { dataUrl: `blob:${id}`, storageKey: `image:${id}`, width: 1024, height: 1024, bytes: 100, mimeType: "image/png" },
+        createdAt: "",
+        updatedAt: "",
     };
 }
 
@@ -285,6 +300,7 @@ describe("studio workspace model", () => {
                     },
                 ],
             }),
+            [imageAsset("asset-char"), imageAsset("asset-scene")],
         );
 
         expect(cards).toMatchObject([
