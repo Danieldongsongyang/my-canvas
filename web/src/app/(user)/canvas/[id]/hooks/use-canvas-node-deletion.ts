@@ -1,33 +1,11 @@
 import { useCallback } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ContextMenuState } from "../../types";
+import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData } from "../../types";
+import type { CanvasDeletionUiState } from "../../utils/canvas-graph-mutations";
 import { deleteCanvasNodesFromGraph } from "../../utils/canvas-graph-mutations";
 
-type UseCanvasNodeDeletionParams = {
-    projectId: string;
-    nodesRef: MutableRefObject<CanvasNodeData[]>;
-    connectionsRef: MutableRefObject<CanvasConnection[]>;
-    chatSessions: CanvasAssistantSession[];
-    cleanupCanvasFiles: (extra?: unknown) => void;
-    setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
-    setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
-    selectedNodeIds: Set<string>;
-    selectedConnectionId: string | null;
-    hoveredNodeId: string | null;
-    toolbarNodeId: string | null;
-    dialogNodeId: string | null;
-    editingNodeId: string | null;
-    infoNodeId: string | null;
-    cropNodeId: string | null;
-    maskEditNodeId: string | null;
-    splitNodeId: string | null;
-    upscaleNodeId: string | null;
-    superResolveNodeId: string | null;
-    angleNodeId: string | null;
-    previewNodeId: string | null;
-    runningNodeId: string | null;
-    contextMenu: ContextMenuState | null;
+type CanvasDeletionUiStateSetters = {
     setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
     setSelectedConnectionId: Dispatch<SetStateAction<string | null>>;
     setHoveredNodeId: Dispatch<SetStateAction<string | null>>;
@@ -43,8 +21,19 @@ type UseCanvasNodeDeletionParams = {
     setAngleNodeId: Dispatch<SetStateAction<string | null>>;
     setPreviewNodeId: Dispatch<SetStateAction<string | null>>;
     setRunningNodeId: Dispatch<SetStateAction<string | null>>;
-    setContextMenu: Dispatch<SetStateAction<ContextMenuState | null>>;
+    setContextMenu: Dispatch<SetStateAction<CanvasDeletionUiState["contextMenu"]>>;
 };
+
+type UseCanvasNodeDeletionParams = CanvasDeletionUiState &
+    CanvasDeletionUiStateSetters & {
+        projectId: string;
+        nodesRef: MutableRefObject<CanvasNodeData[]>;
+        connectionsRef: MutableRefObject<CanvasConnection[]>;
+        chatSessions: CanvasAssistantSession[];
+        cleanupCanvasFiles: (extra?: unknown) => void;
+        setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
+        setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
+    };
 
 export function useCanvasNodeDeletion(params: UseCanvasNodeDeletionParams) {
     const {
@@ -93,50 +82,54 @@ export function useCanvasNodeDeletion(params: UseCanvasNodeDeletionParams) {
         (ids: Set<string>) => {
             if (!ids.size) return;
 
+            const currentUiState: CanvasDeletionUiState = {
+                selectedNodeIds,
+                selectedConnectionId,
+                hoveredNodeId,
+                toolbarNodeId,
+                dialogNodeId,
+                editingNodeId,
+                infoNodeId,
+                cropNodeId,
+                maskEditNodeId,
+                splitNodeId,
+                upscaleNodeId,
+                superResolveNodeId,
+                angleNodeId,
+                previewNodeId,
+                runningNodeId,
+                contextMenu,
+            };
             const result = deleteCanvasNodesFromGraph({
                 nodes: nodesRef.current,
                 connections: connectionsRef.current,
                 nodeIds: ids,
-                uiState: {
-                    selectedNodeIds,
-                    selectedConnectionId,
-                    hoveredNodeId,
-                    toolbarNodeId,
-                    dialogNodeId,
-                    editingNodeId,
-                    infoNodeId,
-                    cropNodeId,
-                    maskEditNodeId,
-                    splitNodeId,
-                    upscaleNodeId,
-                    superResolveNodeId,
-                    angleNodeId,
-                    previewNodeId,
-                    runningNodeId,
-                    contextMenu,
-                },
+                uiState: currentUiState,
             });
+            const nextUiState = result.uiState;
 
-            if (!result.deletedNodeIds.size || !result.uiState) return;
+            if (!result.deletedNodeIds.size || !nextUiState) return;
 
             setNodes(result.nodes);
             setConnections(result.connections);
-            setSelectedNodeIds(result.uiState.selectedNodeIds);
-            setSelectedConnectionId(result.uiState.selectedConnectionId);
-            setHoveredNodeId(result.uiState.hoveredNodeId);
-            setToolbarNodeId(result.uiState.toolbarNodeId);
-            setDialogNodeId(result.uiState.dialogNodeId);
-            setEditingNodeId(result.uiState.editingNodeId);
-            setInfoNodeId(result.uiState.infoNodeId);
-            setCropNodeId(result.uiState.cropNodeId);
-            setMaskEditNodeId(result.uiState.maskEditNodeId);
-            setSplitNodeId(result.uiState.splitNodeId);
-            setUpscaleNodeId(result.uiState.upscaleNodeId);
-            setSuperResolveNodeId(result.uiState.superResolveNodeId);
-            setAngleNodeId(result.uiState.angleNodeId);
-            setPreviewNodeId(result.uiState.previewNodeId);
-            setRunningNodeId(result.uiState.runningNodeId);
-            setContextMenu(result.uiState.contextMenu);
+            applyDeletionUiState(nextUiState, {
+                setSelectedNodeIds,
+                setSelectedConnectionId,
+                setHoveredNodeId,
+                setToolbarNodeId,
+                setDialogNodeId,
+                setEditingNodeId,
+                setInfoNodeId,
+                setCropNodeId,
+                setMaskEditNodeId,
+                setSplitNodeId,
+                setUpscaleNodeId,
+                setSuperResolveNodeId,
+                setAngleNodeId,
+                setPreviewNodeId,
+                setRunningNodeId,
+                setContextMenu,
+            });
             cleanupCanvasFiles({ projectId, nodes: result.nodes, chatSessions });
         },
         [
@@ -181,4 +174,23 @@ export function useCanvasNodeDeletion(params: UseCanvasNodeDeletionParams) {
             setContextMenu,
         ],
     );
+}
+
+function applyDeletionUiState(uiState: CanvasDeletionUiState, setters: CanvasDeletionUiStateSetters) {
+    setters.setSelectedNodeIds(uiState.selectedNodeIds);
+    setters.setSelectedConnectionId(uiState.selectedConnectionId);
+    setters.setHoveredNodeId(uiState.hoveredNodeId);
+    setters.setToolbarNodeId(uiState.toolbarNodeId);
+    setters.setDialogNodeId(uiState.dialogNodeId);
+    setters.setEditingNodeId(uiState.editingNodeId);
+    setters.setInfoNodeId(uiState.infoNodeId);
+    setters.setCropNodeId(uiState.cropNodeId);
+    setters.setMaskEditNodeId(uiState.maskEditNodeId);
+    setters.setSplitNodeId(uiState.splitNodeId);
+    setters.setUpscaleNodeId(uiState.upscaleNodeId);
+    setters.setSuperResolveNodeId(uiState.superResolveNodeId);
+    setters.setAngleNodeId(uiState.angleNodeId);
+    setters.setPreviewNodeId(uiState.previewNodeId);
+    setters.setRunningNodeId(uiState.runningNodeId);
+    setters.setContextMenu(uiState.contextMenu);
 }

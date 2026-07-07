@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { deleteCanvasNodesFromGraph } from "./canvas-graph-mutations";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { deleteCanvasNodesFromGraph, type CanvasDeletionUiState } from "./canvas-graph-mutations";
+import { CanvasNodeType, type CanvasNodeData } from "../types";
 
 function node(id: string, metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     return {
@@ -15,6 +15,28 @@ function node(id: string, metadata: CanvasNodeData["metadata"] = {}): CanvasNode
     };
 }
 
+function deletionUiState(overrides: Partial<CanvasDeletionUiState> = {}): CanvasDeletionUiState {
+    return {
+        selectedNodeIds: new Set(),
+        selectedConnectionId: null,
+        hoveredNodeId: null,
+        toolbarNodeId: null,
+        dialogNodeId: null,
+        editingNodeId: null,
+        infoNodeId: null,
+        cropNodeId: null,
+        maskEditNodeId: null,
+        splitNodeId: null,
+        upscaleNodeId: null,
+        superResolveNodeId: null,
+        angleNodeId: null,
+        previewNodeId: null,
+        runningNodeId: null,
+        contextMenu: null,
+        ...overrides,
+    };
+}
+
 describe("canvas graph mutations", () => {
     it("deletes a normal node and clears related connections and transient UI references", () => {
         const result = deleteCanvasNodesFromGraph({
@@ -24,7 +46,7 @@ describe("canvas graph mutations", () => {
                 { id: "conn-b-c", fromNodeId: "b", toNodeId: "c" },
             ],
             nodeIds: new Set(["b"]),
-            uiState: {
+            uiState: deletionUiState({
                 selectedNodeIds: new Set(["b", "c"]),
                 selectedConnectionId: "conn-b-c",
                 hoveredNodeId: "b",
@@ -32,16 +54,10 @@ describe("canvas graph mutations", () => {
                 dialogNodeId: "b",
                 editingNodeId: "c",
                 infoNodeId: "b",
-                cropNodeId: null,
-                maskEditNodeId: null,
-                splitNodeId: null,
-                upscaleNodeId: null,
-                superResolveNodeId: null,
-                angleNodeId: null,
                 previewNodeId: "b",
                 runningNodeId: "b",
                 contextMenu: { type: "node", x: 0, y: 0, nodeId: "b" },
-            },
+            }),
         });
 
         expect(result.deletedNodeIds).toEqual(new Set(["b"]));
@@ -96,24 +112,14 @@ describe("canvas graph mutations", () => {
                 { id: "conn-child-a", fromNodeId: "child-a", toNodeId: "b" },
             ],
             nodeIds: new Set(["child-a"]),
-            uiState: {
+            uiState: deletionUiState({
                 selectedNodeIds: new Set(["child-a"]),
-                selectedConnectionId: null,
-                hoveredNodeId: null,
-                toolbarNodeId: null,
-                dialogNodeId: null,
-                editingNodeId: null,
-                infoNodeId: null,
-                cropNodeId: null,
-                maskEditNodeId: null,
                 splitNodeId: "child-a",
                 upscaleNodeId: "child-a",
                 superResolveNodeId: "child-a",
                 angleNodeId: "child-a",
-                previewNodeId: null,
-                runningNodeId: null,
                 contextMenu: { type: "connection", x: 0, y: 0, connectionId: "conn-child-a" },
-            },
+            }),
         });
 
         expect(result.deletedNodeIds).toEqual(new Set(["child-a"]));

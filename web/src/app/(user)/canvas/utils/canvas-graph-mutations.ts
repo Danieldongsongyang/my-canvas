@@ -22,7 +22,7 @@ export type CanvasDeletionUiState = {
 export type CanvasNodeDeletionInput = {
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
-    nodeIds: Set<string>;
+    nodeIds: ReadonlySet<string>;
     uiState?: CanvasDeletionUiState;
 };
 
@@ -39,18 +39,19 @@ export function deleteCanvasNodesFromGraph({ nodes, connections, nodeIds, uiStat
         return { nodes, connections, deletedNodeIds, uiState };
     }
 
-    const nextNodes = removeNodesAndRepairBatchRoots(nodes, deletedNodeIds);
+    const nextNodes = deleteNodesAndRepairBatchRoots(nodes, deletedNodeIds);
     const nextConnections = connections.filter((connection) => !deletedNodeIds.has(connection.fromNodeId) && !deletedNodeIds.has(connection.toNodeId));
+    const remainingConnectionIds = new Set(nextConnections.map((connection) => connection.id));
 
     return {
         nodes: nextNodes,
         connections: nextConnections,
         deletedNodeIds,
-        uiState: uiState ? sanitizeDeletionUiState(uiState, deletedNodeIds, new Set(nextConnections.map((connection) => connection.id))) : undefined,
+        uiState: uiState ? sanitizeDeletionUiState(uiState, deletedNodeIds, remainingConnectionIds) : undefined,
     };
 }
 
-function collectDeletedNodeIds(nodes: CanvasNodeData[], nodeIds: Set<string>) {
+function collectDeletedNodeIds(nodes: CanvasNodeData[], nodeIds: ReadonlySet<string>): Set<string> {
     const deletedNodeIds = new Set(nodeIds);
     nodes.forEach((node) => {
         if (!nodeIds.has(node.id)) return;
@@ -59,54 +60,68 @@ function collectDeletedNodeIds(nodes: CanvasNodeData[], nodeIds: Set<string>) {
     return deletedNodeIds;
 }
 
-function removeNodesAndRepairBatchRoots(nodes: CanvasNodeData[], deletedNodeIds: Set<string>) {
+function deleteNodesAndRepairBatchRoots(nodes: CanvasNodeData[], deletedNodeIds: ReadonlySet<string>): CanvasNodeData[] {
     const remainingNodes = nodes.filter((node) => !deletedNodeIds.has(node.id));
-    return remainingNodes.map((node) => {
-        const childIds = node.metadata?.batchChildIds?.filter((childId) => !deletedNodeIds.has(childId));
-        if (!node.metadata?.isBatchRoot || childIds?.length === node.metadata.batchChildIds?.length) return node;
-
-        const primaryImageId = childIds?.includes(node.metadata.primaryImageId || "") ? node.metadata.primaryImageId : childIds?.[0];
-        const primaryNode = remainingNodes.find((item) => item.id === primaryImageId);
-        return {
-            ...node,
-            metadata: {
-                ...node.metadata,
-                batchChildIds: childIds,
-                primaryImageId,
-                content: primaryNode?.metadata?.content || node.metadata.content,
-                naturalWidth: primaryNode?.metadata?.naturalWidth || node.metadata.naturalWidth,
-                naturalHeight: primaryNode?.metadata?.naturalHeight || node.metadata.naturalHeight,
-            },
-        };
-    });
+    return remainingNodes.map((node) => repairBatchRootAfterDeletion(node, remainingNodes, deletedNodeIds));
 }
 
-function sanitizeDeletionUiState(uiState: CanvasDeletionUiState, deletedNodeIds: Set<string>, remainingConnectionIds: Set<string>): CanvasDeletionUiState {
+function repairBatchRootAfterDeletion(node: CanvasNodeData, remainingNodes: CanvasNodeData[], deletedNodeIds: ReadonlySet<string>): CanvasNodeData {
+    const { metadata } = node;
+    if (!metadata?.isBatchRoot || !metadata.batchChildIds) return node;
+
+    const remainingChildIds = metadata.batchChildIds.filter((childId) => !deletedNodeIds.has(childId));
+    if (remainingChildIds.length === metadata.batchChildIds.length) return node;
+
+    const primaryImageId = getPrimaryImageIdAfterDeletion(metadata.primaryImageId, remainingChildIds);
+    const primaryNode = remainingNodes.find((item) => item.id === primaryImageId);
+
+    return {
+        ...node,
+        metadata: {
+            ...metadata,
+            batchChildIds: remainingChildIds,
+            primaryImageId,
+            content: primaryNode?.metadata?.content || metadata.content,
+            naturalWidth: primaryNode?.metadata?.naturalWidth || metadata.naturalWidth,
+            naturalHeight: primaryNode?.metadata?.naturalHeight || metadata.naturalHeight,
+        },
+    };
+}
+
+function getPrimaryImageIdAfterDeletion(currentPrimaryImageId: string | undefined, remainingChildIds: string[]): string | undefined {
+    return remainingChildIds.includes(currentPrimaryImageId || "") ? currentPrimaryImageId : remainingChildIds[0];
+}
+
+function sanitizeDeletionUiState(uiState: CanvasDeletionUiState, deletedNodeIds: ReadonlySet<string>, remainingConnectionIds: ReadonlySet<string>): CanvasDeletionUiState {
     return {
         selectedNodeIds: new Set(),
-        selectedConnectionId: uiState.selectedConnectionId && remainingConnectionIds.has(uiState.selectedConnectionId) ? uiState.selectedConnectionId : null,
-        hoveredNodeId: keepNodeId(uiState.hoveredNodeId, deletedNodeIds),
-        toolbarNodeId: keepNodeId(uiState.toolbarNodeId, deletedNodeIds),
-        dialogNodeId: keepNodeId(uiState.dialogNodeId, deletedNodeIds),
-        editingNodeId: keepNodeId(uiState.editingNodeId, deletedNodeIds),
-        infoNodeId: keepNodeId(uiState.infoNodeId, deletedNodeIds),
-        cropNodeId: keepNodeId(uiState.cropNodeId, deletedNodeIds),
-        maskEditNodeId: keepNodeId(uiState.maskEditNodeId, deletedNodeIds),
-        splitNodeId: keepNodeId(uiState.splitNodeId, deletedNodeIds),
-        upscaleNodeId: keepNodeId(uiState.upscaleNodeId, deletedNodeIds),
-        superResolveNodeId: keepNodeId(uiState.superResolveNodeId, deletedNodeIds),
-        angleNodeId: keepNodeId(uiState.angleNodeId, deletedNodeIds),
-        previewNodeId: keepNodeId(uiState.previewNodeId, deletedNodeIds),
-        runningNodeId: keepNodeId(uiState.runningNodeId, deletedNodeIds),
+        selectedConnectionId: keepConnectionId(uiState.selectedConnectionId, remainingConnectionIds),
+        hoveredNodeId: keepNodeIdUnlessDeleted(uiState.hoveredNodeId, deletedNodeIds),
+        toolbarNodeId: keepNodeIdUnlessDeleted(uiState.toolbarNodeId, deletedNodeIds),
+        dialogNodeId: keepNodeIdUnlessDeleted(uiState.dialogNodeId, deletedNodeIds),
+        editingNodeId: keepNodeIdUnlessDeleted(uiState.editingNodeId, deletedNodeIds),
+        infoNodeId: keepNodeIdUnlessDeleted(uiState.infoNodeId, deletedNodeIds),
+        cropNodeId: keepNodeIdUnlessDeleted(uiState.cropNodeId, deletedNodeIds),
+        maskEditNodeId: keepNodeIdUnlessDeleted(uiState.maskEditNodeId, deletedNodeIds),
+        splitNodeId: keepNodeIdUnlessDeleted(uiState.splitNodeId, deletedNodeIds),
+        upscaleNodeId: keepNodeIdUnlessDeleted(uiState.upscaleNodeId, deletedNodeIds),
+        superResolveNodeId: keepNodeIdUnlessDeleted(uiState.superResolveNodeId, deletedNodeIds),
+        angleNodeId: keepNodeIdUnlessDeleted(uiState.angleNodeId, deletedNodeIds),
+        previewNodeId: keepNodeIdUnlessDeleted(uiState.previewNodeId, deletedNodeIds),
+        runningNodeId: keepNodeIdUnlessDeleted(uiState.runningNodeId, deletedNodeIds),
         contextMenu: keepContextMenu(uiState.contextMenu, deletedNodeIds, remainingConnectionIds),
     };
 }
 
-function keepNodeId(nodeId: string | null, deletedNodeIds: Set<string>) {
+function keepConnectionId(connectionId: string | null, remainingConnectionIds: ReadonlySet<string>): string | null {
+    return connectionId && remainingConnectionIds.has(connectionId) ? connectionId : null;
+}
+
+function keepNodeIdUnlessDeleted(nodeId: string | null, deletedNodeIds: ReadonlySet<string>): string | null {
     return nodeId && deletedNodeIds.has(nodeId) ? null : nodeId;
 }
 
-function keepContextMenu(contextMenu: ContextMenuState | null, deletedNodeIds: Set<string>, remainingConnectionIds: Set<string>) {
+function keepContextMenu(contextMenu: ContextMenuState | null, deletedNodeIds: ReadonlySet<string>, remainingConnectionIds: ReadonlySet<string>): ContextMenuState | null {
     if (contextMenu?.type === "node" && deletedNodeIds.has(contextMenu.nodeId)) return null;
     if (contextMenu?.type === "connection" && !remainingConnectionIds.has(contextMenu.connectionId)) return null;
     return contextMenu;
