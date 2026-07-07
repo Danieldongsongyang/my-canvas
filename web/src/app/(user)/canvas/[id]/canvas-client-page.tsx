@@ -8,7 +8,6 @@ import { saveAs } from "file-saver";
 
 import { DOCS_URL } from "@/constant/env";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { uploadImage } from "@/services/image-storage";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
@@ -44,6 +43,7 @@ import { useTextNodeHandlers } from "../hooks/use-text-node-handlers";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantSession, type CanvasNodeData, type Position } from "../types";
+import { materializeCanvasImageMedia } from "../services/canvas-node-media";
 import type { PendingConnectionCreate } from "./canvas-page-types";
 import {
     NODE_STATUS_SUCCESS,
@@ -866,8 +866,8 @@ function InfiniteCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
-            const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
+            const storedImage = await materializeCanvasImageMedia(image);
+            const meta = storedImage.width && storedImage.height ? storedImage : await readImageMeta(storedImage.url);
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -934,8 +934,8 @@ function InfiniteCanvasPage() {
                 ]);
                 setSelectedNodeIds(new Set([id]));
             } else {
-                const storedImage = payload.storageKey ? { url: payload.dataUrl, storageKey: payload.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(payload.dataUrl);
-                const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
+                const storedImage = await materializeCanvasImageMedia(payload);
+                const meta = storedImage.width && storedImage.height ? storedImage : await readImageMeta(storedImage.url);
                 const config = fitNodeSize(meta.width, meta.height);
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

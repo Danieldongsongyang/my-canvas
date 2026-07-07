@@ -7,6 +7,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type ConnectionHandle, type Position } from "../types";
+import { hydrateCanvasAssistantImageMedia, hydrateCanvasNodeImageMedia } from "../services/canvas-node-media";
 
 export const VIDEO_NODE_MAX_WIDTH = 420;
 export const VIDEO_NODE_MAX_HEIGHT = 420;
@@ -195,35 +196,13 @@ export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
         nodes.map(async (node) => {
             const content = node.metadata?.content;
             if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (node.type !== CanvasNodeType.Image || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
-            if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            return hydrateCanvasNodeImageMedia(node);
         }),
     );
 }
 
 export async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
-    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
-        if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
-        if (item.dataUrl?.startsWith("data:image/")) {
-            const image = await uploadImage(item.dataUrl);
-            return { ...item, dataUrl: image.url, storageKey: image.storageKey };
-        }
-        return item;
-    };
-    return Promise.all(
-        sessions.map(async (session) => ({
-            ...session,
-            messages: await Promise.all(
-                session.messages.map(async (message) => ({
-                    ...message,
-                    references: await Promise.all((message.references || []).map(hydrateItem)),
-                    images: await Promise.all((message.images || []).map(hydrateItem)),
-                })),
-            ),
-        })),
-    );
+    return hydrateCanvasAssistantImageMedia(sessions);
 }
 
 export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
