@@ -62,6 +62,7 @@ import {
 import { useCanvasKeyboardShortcuts } from "./hooks/use-canvas-keyboard-shortcuts";
 import { useCanvasGeneration } from "./hooks/use-canvas-generation";
 import { useCanvasImageActions } from "./hooks/use-canvas-image-actions";
+import { useCanvasNodeDeletion } from "./hooks/use-canvas-node-deletion";
 import { useCanvasPanels } from "./hooks/use-canvas-panels";
 import { useCanvasWorkspaceSession } from "./workspace-session";
 
@@ -463,51 +464,47 @@ function InfiniteCanvasPage() {
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
     );
 
-    const deleteNodes = useCallback(
-        (ids: Set<string>) => {
-            if (!ids.size) return;
-            const allIds = new Set(ids);
-            nodesRef.current.forEach((node) => {
-                if (ids.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => allIds.add(childId));
-            });
-            setNodes((prev) => {
-                const next = prev.filter((node) => !allIds.has(node.id));
-                return next.map((node) => {
-                    const childIds = node.metadata?.batchChildIds?.filter((childId) => !allIds.has(childId));
-                    if (!node.metadata?.isBatchRoot || childIds?.length === node.metadata.batchChildIds?.length) return node;
-                    const primaryImageId = childIds?.includes(node.metadata.primaryImageId || "") ? node.metadata.primaryImageId : childIds?.[0];
-                    const primaryNode = next.find((item) => item.id === primaryImageId);
-                    return {
-                        ...node,
-                        metadata: {
-                            ...node.metadata,
-                            batchChildIds: childIds,
-                            primaryImageId,
-                            content: primaryNode?.metadata?.content || node.metadata.content,
-                            naturalWidth: primaryNode?.metadata?.naturalWidth || node.metadata.naturalWidth,
-                            naturalHeight: primaryNode?.metadata?.naturalHeight || node.metadata.naturalHeight,
-                        },
-                    };
-                });
-            });
-            setConnections((prev) => prev.filter((conn) => !allIds.has(conn.fromNodeId) && !allIds.has(conn.toNodeId)));
-            setSelectedNodeIds(new Set());
-            setSelectedConnectionId(null);
-            setHoveredNodeId((current) => (current && allIds.has(current) ? null : current));
-            setToolbarNodeId((current) => (current && allIds.has(current) ? null : current));
-            setDialogNodeId((current) => (current && allIds.has(current) ? null : current));
-            setEditingNodeId((current) => (current && allIds.has(current) ? null : current));
-            setInfoNodeId((current) => (current && allIds.has(current) ? null : current));
-            setCropNodeId((current) => (current && allIds.has(current) ? null : current));
-            setMaskEditNodeId((current) => (current && allIds.has(current) ? null : current));
-            setAngleNodeId((current) => (current && allIds.has(current) ? null : current));
-            setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
-            setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
-            setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
-            cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
-        },
-        [chatSessions, cleanupCanvasFiles, projectId],
-    );
+    const deleteNodes = useCanvasNodeDeletion({
+        projectId,
+        nodesRef,
+        connectionsRef,
+        chatSessions,
+        cleanupCanvasFiles,
+        setNodes,
+        setConnections,
+        selectedNodeIds,
+        selectedConnectionId,
+        hoveredNodeId,
+        toolbarNodeId,
+        dialogNodeId,
+        editingNodeId,
+        infoNodeId,
+        cropNodeId,
+        maskEditNodeId,
+        splitNodeId,
+        upscaleNodeId,
+        superResolveNodeId,
+        angleNodeId,
+        previewNodeId,
+        runningNodeId,
+        contextMenu,
+        setSelectedNodeIds,
+        setSelectedConnectionId,
+        setHoveredNodeId,
+        setToolbarNodeId,
+        setDialogNodeId,
+        setEditingNodeId,
+        setInfoNodeId,
+        setCropNodeId,
+        setMaskEditNodeId,
+        setSplitNodeId,
+        setUpscaleNodeId,
+        setSuperResolveNodeId,
+        setAngleNodeId,
+        setPreviewNodeId,
+        setRunningNodeId,
+        setContextMenu,
+    });
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
