@@ -9,6 +9,12 @@ import { generateCanvasTextToImage, retryCanvasGeneratedImage, type CanvasImageG
 import type { CanvasAssetCreator } from "./canvas-asset-intake";
 import type { CanvasNodeMediaAdapter } from "./canvas-node-media";
 
+const CANVAS_ID = "canvas-1";
+const CANVAS_TITLE = "画布";
+const FIXED_NOW = "2026-07-03T10:00:00.000Z";
+const PROMPT = "一只白色茶杯";
+const EFFECTIVE_PROMPT = "一只白色茶杯，产品摄影";
+
 function textNode(overrides: Partial<CanvasNodeData> = {}): CanvasNodeData {
     return {
         id: "text-1",
@@ -17,7 +23,7 @@ function textNode(overrides: Partial<CanvasNodeData> = {}): CanvasNodeData {
         position: { x: 20, y: 40 },
         width: 320,
         height: 180,
-        metadata: { content: "一只白色茶杯", status: "success" },
+        metadata: { content: PROMPT, status: "success" },
         ...overrides,
     };
 }
@@ -46,8 +52,8 @@ function createMediaAdapter(): CanvasNodeMediaAdapter {
     };
 }
 
-function config() {
-    return { ...defaultConfig, model: "image-model", size: "1:1", quality: "auto", count: "1" };
+function config(count = "1") {
+    return { ...defaultConfig, model: "image-model", size: "1:1", quality: "auto", count };
 }
 
 function ids(...values: string[]) {
@@ -55,12 +61,24 @@ function ids(...values: string[]) {
     return () => values[index++] || `id-${index}`;
 }
 
+function imageDataUrl(id: string) {
+    return `data:image/png;base64,${id}`;
+}
+
+function canvasAssetIntake(addAsset: CanvasAssetCreator) {
+    return {
+        canvasId: CANVAS_ID,
+        addAsset,
+        now: () => FIXED_NOW,
+    };
+}
+
 function canvasProject(nodes: CanvasNodeData[], connections: CanvasConnection[] = []): CanvasProject {
     return {
-        id: "canvas-1",
-        title: "画布",
-        createdAt: "2026-07-03T10:00:00.000Z",
-        updatedAt: "2026-07-03T10:00:00.000Z",
+        id: CANVAS_ID,
+        title: CANVAS_TITLE,
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
         nodes,
         connections,
         groups: [],
@@ -70,6 +88,29 @@ function canvasProject(nodes: CanvasNodeData[], connections: CanvasConnection[] 
         showImageInfo: false,
         viewport: { x: 0, y: 0, k: 1 },
     };
+}
+
+function nodeById(nodes: CanvasNodeData[], id: string): CanvasNodeData {
+    const node = nodes.find((item) => item.id === id);
+    if (!node) throw new Error(`Expected canvas node ${id}`);
+    return node;
+}
+
+function generateTwoImageBatch(params: { requester: CanvasImageGenerationRequester; mediaAdapter: CanvasNodeMediaAdapter; addAsset: CanvasAssetCreator }) {
+    return generateCanvasTextToImage({
+        nodes: [textNode()],
+        connections: [],
+        sourceNodeId: "text-1",
+        prompt: PROMPT,
+        effectivePrompt: EFFECTIVE_PROMPT,
+        generationConfig: config("2"),
+        referenceImages: [],
+        createId: ids("root-1", "child-a", "child-b"),
+        createConnectionId: ids("conn-text-root", "conn-root-child-a", "conn-root-child-b"),
+        requester: params.requester,
+        mediaAdapter: params.mediaAdapter,
+        assetIntake: canvasAssetIntake(params.addAsset),
+    });
 }
 
 describe("canvas generation orchestration", () => {
@@ -90,19 +131,15 @@ describe("canvas generation orchestration", () => {
             nodes: [textNode()],
             connections: [],
             sourceNodeId: "text-1",
-            prompt: "一只白色茶杯",
-            effectivePrompt: "一只白色茶杯，产品摄影",
+            prompt: PROMPT,
+            effectivePrompt: EFFECTIVE_PROMPT,
             generationConfig: config(),
             referenceImages: [],
             createId: ids("image-1"),
             createConnectionId: ids("conn-text-image"),
             requester,
             mediaAdapter,
-            assetIntake: {
-                canvasId: "canvas-1",
-                addAsset,
-                now: () => "2026-07-03T10:00:00.000Z",
-            },
+            assetIntake: canvasAssetIntake(addAsset),
             onStart,
         });
 
@@ -114,21 +151,21 @@ describe("canvas generation orchestration", () => {
             }),
         );
 
-        resolveGeneration([{ dataUrl: "data:image/png;base64,AAA" }]);
+        resolveGeneration([{ dataUrl: imageDataUrl("AAA") }]);
         const result = await pendingResult;
 
-        expect(requester.generate).toHaveBeenCalledWith(expect.objectContaining({ count: "1", model: "image-model" }), "一只白色茶杯，产品摄影");
-        expect(mediaAdapter.image.upload).toHaveBeenCalledWith("data:image/png;base64,AAA");
+        expect(requester.generate).toHaveBeenCalledWith(expect.objectContaining({ count: "1", model: "image-model" }), EFFECTIVE_PROMPT);
+        expect(mediaAdapter.image.upload).toHaveBeenCalledWith(imageDataUrl("AAA"));
         expect(addAsset).toHaveBeenCalledWith(
             expect.objectContaining({
                 kind: "image",
                 coverUrl: "blob:AAA",
                 data: expect.objectContaining({ dataUrl: "blob:AAA", storageKey: "image:AAA", width: 1024, height: 768 }),
-                metadata: expect.objectContaining({ source: "canvas-generation", canvasRole: "generated", canvasId: "canvas-1", nodeId: "image-1", sourceNodeId: "text-1" }),
+                metadata: expect.objectContaining({ source: "canvas-generation", canvasRole: "generated", canvasId: CANVAS_ID, nodeId: "image-1", sourceNodeId: "text-1" }),
             }),
         );
         expect(result.connections).toEqual<CanvasConnection[]>([{ id: "conn-text-image", fromNodeId: "text-1", toNodeId: "image-1" }]);
-        expect(result.nodes[0]).toMatchObject({ id: "text-1", type: CanvasNodeType.Text, metadata: { content: "一只白色茶杯", prompt: "一只白色茶杯", status: "success" } });
+        expect(result.nodes[0]).toMatchObject({ id: "text-1", type: CanvasNodeType.Text, metadata: { content: PROMPT, prompt: PROMPT, status: "success" } });
         expect(result.nodes[1]).toMatchObject({
             id: "image-1",
             type: CanvasNodeType.Image,
@@ -136,7 +173,7 @@ describe("canvas generation orchestration", () => {
                 content: "blob:AAA",
                 storageKey: "image:AAA",
                 status: "success",
-                prompt: "一只白色茶杯，产品摄影",
+                prompt: EFFECTIVE_PROMPT,
                 generationType: "generation",
                 primaryImageId: "image-1",
                 assetRef: {
@@ -169,8 +206,8 @@ describe("canvas generation orchestration", () => {
             nodes: [textNode()],
             connections: [],
             sourceNodeId: "text-1",
-            prompt: "一只白色茶杯",
-            effectivePrompt: "一只白色茶杯",
+            prompt: PROMPT,
+            effectivePrompt: PROMPT,
             generationConfig: config(),
             referenceImages: [],
             createId: ids("image-1"),
@@ -179,8 +216,8 @@ describe("canvas generation orchestration", () => {
             mediaAdapter: createMediaAdapter(),
         });
 
-        expect(result.nodes.find((node) => node.id === "text-1")).toMatchObject({ metadata: { content: "一只白色茶杯", status: "success" } });
-        expect(result.nodes.find((node) => node.id === "image-1")).toMatchObject({ metadata: { status: "error", errorDetails: "全部图片生成失败", prompt: "一只白色茶杯" } });
+        expect(nodeById(result.nodes, "text-1")).toMatchObject({ metadata: { content: PROMPT, status: "success" } });
+        expect(nodeById(result.nodes, "image-1")).toMatchObject({ metadata: { status: "error", errorDetails: "全部图片生成失败", prompt: PROMPT } });
         expect(result.connections).toEqual([{ id: "conn-text-image", fromNodeId: "text-1", toNodeId: "image-1" }]);
         expect(result.hasSuccess).toBe(false);
         expect(result.hasFailure).toBe(true);
@@ -188,40 +225,33 @@ describe("canvas generation orchestration", () => {
 
     it("creates independent asset refs for every successful batch child image", async () => {
         const requester: CanvasImageGenerationRequester = {
-            generate: vi.fn().mockResolvedValueOnce([{ dataUrl: "data:image/png;base64,AAA" }]).mockResolvedValueOnce([{ dataUrl: "data:image/png;base64,BBB" }]),
+            generate: vi
+                .fn()
+                .mockResolvedValueOnce([{ dataUrl: imageDataUrl("AAA") }])
+                .mockResolvedValueOnce([{ dataUrl: imageDataUrl("BBB") }]),
             edit: vi.fn(),
         };
         const mediaAdapter = createMediaAdapter();
         const addAsset: CanvasAssetCreator = vi.fn().mockReturnValueOnce("asset-child-a").mockReturnValueOnce("asset-child-b");
 
-        const result = await generateCanvasTextToImage({
-            nodes: [textNode()],
-            connections: [],
-            sourceNodeId: "text-1",
-            prompt: "一只白色茶杯",
-            effectivePrompt: "一只白色茶杯，产品摄影",
-            generationConfig: { ...config(), count: "2" },
-            referenceImages: [],
-            createId: ids("root-1", "child-a", "child-b"),
-            createConnectionId: ids("conn-text-root", "conn-root-child-a", "conn-root-child-b"),
-            requester,
-            mediaAdapter,
-            assetIntake: {
-                canvasId: "canvas-1",
-                addAsset,
-                now: () => "2026-07-03T10:00:00.000Z",
-            },
-        });
+        const result = await generateTwoImageBatch({ requester, mediaAdapter, addAsset });
 
-        const root = result.nodes.find((node) => node.id === "root-1")!;
-        const childA = result.nodes.find((node) => node.id === "child-a")!;
-        const childB = result.nodes.find((node) => node.id === "child-b")!;
+        const root = nodeById(result.nodes, "root-1");
+        const childA = nodeById(result.nodes, "child-a");
+        const childB = nodeById(result.nodes, "child-b");
 
         expect(addAsset).toHaveBeenCalledTimes(2);
         expect(addAsset).toHaveBeenNthCalledWith(
             1,
             expect.objectContaining({
-                data: expect.objectContaining({ dataUrl: "blob:AAA", storageKey: "image:AAA", width: 1024, height: 768, bytes: 1234, mimeType: "image/png" }),
+                data: expect.objectContaining({
+                    dataUrl: "blob:AAA",
+                    storageKey: "image:AAA",
+                    width: 1024,
+                    height: 768,
+                    bytes: 1234,
+                    mimeType: "image/png",
+                }),
                 metadata: expect.objectContaining({ nodeId: "child-a", rootNodeId: "root-1", batchId: "root-1" }),
             }),
         );
@@ -248,7 +278,13 @@ describe("canvas generation orchestration", () => {
                 assetId: "asset-child-a",
                 kind: "image",
                 role: "reference",
-                metadata: expect.objectContaining({ source: "canvas-generation", canvasRole: "generated", nodeId: "child-a", rootNodeId: "root-1", storageKey: "image:AAA" }),
+                metadata: expect.objectContaining({
+                    source: "canvas-generation",
+                    canvasRole: "generated",
+                    nodeId: "child-a",
+                    rootNodeId: "root-1",
+                    storageKey: "image:AAA",
+                }),
             },
         });
         expect(childB.metadata).toMatchObject({
@@ -260,45 +296,37 @@ describe("canvas generation orchestration", () => {
                 assetId: "asset-child-b",
                 kind: "image",
                 role: "reference",
-                metadata: expect.objectContaining({ source: "canvas-generation", canvasRole: "generated", nodeId: "child-b", rootNodeId: "root-1", storageKey: "image:BBB" }),
+                metadata: expect.objectContaining({
+                    source: "canvas-generation",
+                    canvasRole: "generated",
+                    nodeId: "child-b",
+                    rootNodeId: "root-1",
+                    storageKey: "image:BBB",
+                }),
             },
         });
         expect(childA.metadata?.assetRef?.assetId).not.toBe(childB.metadata?.assetRef?.assetId);
         expect(findAssetReferences("asset-child-b", { studioSeries: [], canvasProjects: [canvasProject(result.nodes, result.connections)] })).toEqual([
-            expect.objectContaining({ source: "canvas", assetId: "asset-child-b", canvasId: "canvas-1", nodeId: "child-b", label: "画布 / 一只白色茶杯，产品摄影" }),
+            expect.objectContaining({ source: "canvas", assetId: "asset-child-b", canvasId: CANVAS_ID, nodeId: "child-b", label: `${CANVAS_TITLE} / ${EFFECTIVE_PROMPT}` }),
         ]);
     });
 
     it("creates assets only for successful batch children when part of the batch fails", async () => {
         const requester: CanvasImageGenerationRequester = {
-            generate: vi.fn().mockResolvedValueOnce([{ dataUrl: "data:image/png;base64,AAA" }]).mockRejectedValueOnce(new Error("第二张失败")),
+            generate: vi
+                .fn()
+                .mockResolvedValueOnce([{ dataUrl: imageDataUrl("AAA") }])
+                .mockRejectedValueOnce(new Error("第二张失败")),
             edit: vi.fn(),
         };
         const mediaAdapter = createMediaAdapter();
         const addAsset: CanvasAssetCreator = vi.fn(() => "asset-child-a");
 
-        const result = await generateCanvasTextToImage({
-            nodes: [textNode()],
-            connections: [],
-            sourceNodeId: "text-1",
-            prompt: "一只白色茶杯",
-            effectivePrompt: "一只白色茶杯，产品摄影",
-            generationConfig: { ...config(), count: "2" },
-            referenceImages: [],
-            createId: ids("root-1", "child-a", "child-b"),
-            createConnectionId: ids("conn-text-root", "conn-root-child-a", "conn-root-child-b"),
-            requester,
-            mediaAdapter,
-            assetIntake: {
-                canvasId: "canvas-1",
-                addAsset,
-                now: () => "2026-07-03T10:00:00.000Z",
-            },
-        });
+        const result = await generateTwoImageBatch({ requester, mediaAdapter, addAsset });
 
-        const root = result.nodes.find((node) => node.id === "root-1")!;
-        const childA = result.nodes.find((node) => node.id === "child-a")!;
-        const childB = result.nodes.find((node) => node.id === "child-b")!;
+        const root = nodeById(result.nodes, "root-1");
+        const childA = nodeById(result.nodes, "child-a");
+        const childB = nodeById(result.nodes, "child-b");
 
         expect(addAsset).toHaveBeenCalledTimes(1);
         expect(root.metadata).toMatchObject({ status: "success", primaryImageId: "child-a", assetRef: { assetId: "asset-child-a", kind: "image", role: "reference" } });
@@ -316,8 +344,8 @@ describe("canvas generation orchestration", () => {
             nodes: [textNode()],
             connections: [],
             sourceNodeId: "text-1",
-            prompt: "一只白色茶杯",
-            effectivePrompt: "一只白色茶杯",
+            prompt: PROMPT,
+            effectivePrompt: PROMPT,
             generationConfig: config(),
             referenceImages: [],
             createId: ids("image-1"),
@@ -331,15 +359,15 @@ describe("canvas generation orchestration", () => {
             mediaAdapter,
         });
         const retryRequester: CanvasImageGenerationRequester = {
-            generate: vi.fn(async () => [{ dataUrl: "data:image/png;base64,BBB" }]),
+            generate: vi.fn(async () => [{ dataUrl: imageDataUrl("BBB") }]),
             edit: vi.fn(),
         };
-        const failedNode = failed.nodes.find((node) => node.id === "image-1")!;
+        const failedNode = nodeById(failed.nodes, "image-1");
 
         const nodes = await retryCanvasGeneratedImage({
             nodes: failed.nodes,
             node: failedNode,
-            prompt: "一只白色茶杯",
+            prompt: PROMPT,
             generationConfig: config(),
             retryImages: [],
             useReferenceImages: false,
@@ -348,14 +376,14 @@ describe("canvas generation orchestration", () => {
             mediaAdapter,
         });
 
-        expect(retryRequester.generate).toHaveBeenCalledWith(expect.objectContaining({ count: "1" }), "一只白色茶杯");
-        expect(nodes.find((node) => node.id === "text-1")).toMatchObject({ metadata: { content: "一只白色茶杯", status: "success" } });
-        expect(nodes.find((node) => node.id === "image-1")).toMatchObject({
+        expect(retryRequester.generate).toHaveBeenCalledWith(expect.objectContaining({ count: "1" }), PROMPT);
+        expect(nodeById(nodes, "text-1")).toMatchObject({ metadata: { content: PROMPT, status: "success" } });
+        expect(nodeById(nodes, "image-1")).toMatchObject({
             metadata: {
                 content: "blob:BBB",
                 storageKey: "image:BBB",
                 status: "success",
-                prompt: "一只白色茶杯",
+                prompt: PROMPT,
                 generationType: "generation",
             },
         });
