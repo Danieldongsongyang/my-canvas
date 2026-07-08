@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createZip, readZip } from "@/lib/zip";
 import type { Asset } from "@/stores/use-asset-store";
@@ -23,6 +23,10 @@ vi.mock("@/services/asset-media-storage", async (importOriginal) => {
 vi.mock("file-saver", () => ({ saveAs: mocks.saveAs }));
 
 import { exportAssets, readAssetPackage } from "./asset-transfer";
+
+beforeEach(() => {
+    vi.clearAllMocks();
+});
 
 function asset(overrides: Partial<Asset> = {}): Asset {
     return {

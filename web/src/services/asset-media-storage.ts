@@ -4,27 +4,52 @@ import { deleteStoredMedia, getMediaBlob, listStoredMediaKeys, resolveMediaUrl, 
 import { deleteStoredImages, getImageBlob, listStoredImageKeys, resolveImageUrl, setImageBlob, uploadImage, type UploadedImage } from "@/services/image-storage";
 
 export type AssetMediaStorageKind = "image" | "video" | "audio" | "file" | "video-reference" | "audio-reference";
+export type AssetMediaFileStorageKind = Exclude<AssetMediaStorageKind, "image">;
 export type UploadedAssetImage = UploadedImage;
 export type UploadedAssetFile = UploadedFile;
 export type UploadedAssetMedia = UploadedImage | UploadedFile;
 
-export type AssetMediaStorageEngine = {
+type AssetMediaUploadInput = string | Blob;
+
+export type AssetMediaStorageEngine<TUpload extends UploadedAssetMedia = UploadedAssetMedia> = {
     readBlob: (storageKey: string) => Promise<Blob | null>;
     writeBlob: (storageKey: string, blob: Blob) => Promise<string>;
     resolveUrl: (storageKey: string, fallback?: string) => Promise<string>;
-    upload?: (input: string | Blob, prefix?: string) => Promise<UploadedAssetMedia>;
+    upload?: (input: AssetMediaUploadInput, prefix?: string) => Promise<TUpload>;
     listStorageKeys?: () => Promise<string[]>;
     deleteStorageKeys?: (keys: Iterable<string>) => Promise<void>;
 };
 
 export type AssetMediaStorageAdapter = {
-    image: AssetMediaStorageEngine;
-    media: AssetMediaStorageEngine;
+    image: AssetMediaStorageEngine<UploadedAssetImage>;
+    media: AssetMediaStorageEngine<UploadedAssetFile>;
 };
 
-export type AssetMediaStorage = ReturnType<typeof createAssetMediaStorage>;
+export type AssetMediaStorage = {
+    readBlob: (storageKey: string) => Promise<Blob | null>;
+    writeBlob: (storageKey: string, blob: Blob) => Promise<string>;
+    resolveUrl: (storageKey?: string, fallback?: string) => Promise<string>;
+    upload: {
+        (input: AssetMediaUploadInput, kind: "image"): Promise<UploadedAssetImage>;
+        (input: AssetMediaUploadInput, kind?: AssetMediaFileStorageKind): Promise<UploadedAssetFile>;
+        (input: AssetMediaUploadInput, kind?: AssetMediaStorageKind): Promise<UploadedAssetMedia>;
+    };
+    listStorageKeys: () => Promise<string[]>;
+    deleteStorageKeys: (keys: Iterable<string>) => Promise<void>;
+};
 
 const STORAGE_KEY_PATTERN = /^(image|video|audio|file|video-reference|audio-reference):.+$/;
+const MIME_EXTENSION_RULES = [
+    ["png", "png"],
+    ["jpeg", "jpg"],
+    ["webp", "webp"],
+    ["gif", "gif"],
+    ["mp4", "mp4"],
+    ["webm", "webm"],
+    ["wav", "wav"],
+    ["mpeg", "mp3"],
+    ["mp3", "mp3"],
+] as const;
 
 const defaultAssetMediaStorageAdapter: AssetMediaStorageAdapter = {
     image: {
@@ -47,37 +72,39 @@ const defaultAssetMediaStorageAdapter: AssetMediaStorageAdapter = {
 
 export const assetMediaStorage = createAssetMediaStorage(defaultAssetMediaStorageAdapter);
 
-export function uploadAssetImage(input: string | Blob, storage: AssetMediaStorage = assetMediaStorage): Promise<UploadedAssetImage> {
-    return storage.upload(input, "image") as Promise<UploadedAssetImage>;
+export function uploadAssetImage(input: AssetMediaUploadInput, storage: AssetMediaStorage = assetMediaStorage): Promise<UploadedAssetImage> {
+    return storage.upload(input, "image");
 }
 
-export function createAssetMediaStorage(adapter: AssetMediaStorageAdapter) {
+export function createAssetMediaStorage(adapter: AssetMediaStorageAdapter): AssetMediaStorage {
+    function upload(input: AssetMediaUploadInput, kind: "image"): Promise<UploadedAssetImage>;
+    function upload(input: AssetMediaUploadInput, kind?: AssetMediaFileStorageKind): Promise<UploadedAssetFile>;
+    function upload(input: AssetMediaUploadInput, kind?: AssetMediaStorageKind): Promise<UploadedAssetMedia>;
+    function upload(input: AssetMediaUploadInput, kind: AssetMediaStorageKind = "file"): Promise<UploadedAssetMedia> {
+        const engine = engineForStorageKind(kind, adapter);
+        if (!engine.upload) throw new Error("当前媒体存储不支持上传");
+        return engine.upload(input, kind);
+    }
+
     return {
         readBlob: (storageKey: string) => engineForStorageKey(storageKey, adapter).readBlob(storageKey),
         writeBlob: (storageKey: string, blob: Blob) => engineForStorageKey(storageKey, adapter).writeBlob(storageKey, blob),
         resolveUrl: (storageKey?: string, fallback = "") => {
-            if (!storageKey || !isAssetMediaStorageKey(storageKey)) return Promise.resolve(fallback);
-            return engineForStorageKey(storageKey, adapter).resolveUrl(storageKey, fallback);
+            const parsed = storageKey ? parseAssetMediaStorageKey(storageKey) : null;
+            if (!parsed) return Promise.resolve(fallback);
+            return engineForStorageKind(parsed.kind, adapter).resolveUrl(parsed.storageKey, fallback);
         },
-        upload: (input: string | Blob, kind: AssetMediaStorageKind = "file") => {
-            const engine = kind === "image" ? adapter.image : adapter.media;
-            if (!engine.upload) throw new Error("当前媒体存储不支持上传");
-            return engine.upload(input, kind);
-        },
-        listStorageKeys: async () => {
-            const imageKeys = (await adapter.image.listStorageKeys?.()) || [];
-            const mediaKeys = (await adapter.media.listStorageKeys?.()) || [];
+        upload,
+        listStorageKeys: async (): Promise<string[]> => {
+            const [imageKeys, mediaKeys] = await Promise.all([adapter.image.listStorageKeys?.() ?? [], adapter.media.listStorageKeys?.() ?? []]);
             return [...imageKeys, ...mediaKeys];
         },
         deleteStorageKeys: async (keys: Iterable<string>) => {
-            const imageKeys: string[] = [];
-            const mediaKeys: string[] = [];
-            for (const key of new Set(keys)) {
-                if (!isAssetMediaStorageKey(key)) continue;
-                if (parseAssetMediaStorageKey(key)?.kind === "image") imageKeys.push(key);
-                else mediaKeys.push(key);
-            }
-            await Promise.all([imageKeys.length ? adapter.image.deleteStorageKeys?.(imageKeys) : undefined, mediaKeys.length ? adapter.media.deleteStorageKeys?.(mediaKeys) : undefined]);
+            const { imageKeys, mediaKeys } = groupStorageKeysByEngine(keys);
+            const deleteTasks: Array<Promise<void>> = [];
+            if (imageKeys.length && adapter.image.deleteStorageKeys) deleteTasks.push(adapter.image.deleteStorageKeys(imageKeys));
+            if (mediaKeys.length && adapter.media.deleteStorageKeys) deleteTasks.push(adapter.media.deleteStorageKeys(mediaKeys));
+            await Promise.all(deleteTasks);
         },
     };
 }
@@ -87,8 +114,9 @@ export function isAssetMediaStorageKey(value: string): boolean {
 }
 
 export function parseAssetMediaStorageKey(storageKey: string): { kind: AssetMediaStorageKind; storageKey: string } | null {
-    if (!isAssetMediaStorageKey(storageKey)) return null;
-    return { kind: storageKey.slice(0, storageKey.indexOf(":")) as AssetMediaStorageKind, storageKey };
+    const match = STORAGE_KEY_PATTERN.exec(storageKey);
+    if (!match) return null;
+    return { kind: match[1] as AssetMediaStorageKind, storageKey };
 }
 
 export function collectAssetMediaStorageKeys(value: unknown, keys = new Set<string>()): Set<string> {
@@ -106,25 +134,48 @@ export function collectAssetMediaStorageKeys(value: unknown, keys = new Set<stri
 }
 
 export function inferAssetMediaFileExtension(mimeType: string | undefined, storageKey: string): string {
-    const type = mimeType || "";
-    if (type.includes("png")) return "png";
-    if (type.includes("jpeg")) return "jpg";
-    if (type.includes("webp")) return "webp";
-    if (type.includes("gif")) return "gif";
-    if (type.includes("mp4")) return "mp4";
-    if (type.includes("webm")) return "webm";
-    if (type.includes("wav")) return "wav";
-    if (type.includes("mpeg") || type.includes("mp3")) return "mp3";
+    const mimeExtension = extensionFromMimeType(mimeType);
+    if (mimeExtension) return mimeExtension;
 
     const parsed = parseAssetMediaStorageKey(storageKey);
-    if (parsed?.kind === "image") return "png";
-    if (parsed?.kind === "video" || parsed?.kind === "video-reference") return "mp4";
-    if (parsed?.kind === "audio" || parsed?.kind === "audio-reference") return "mp3";
+    switch (parsed?.kind) {
+        case "image":
+            return "png";
+        case "video":
+        case "video-reference":
+            return "mp4";
+        case "audio":
+        case "audio-reference":
+            return "mp3";
+    }
     return "bin";
+}
+
+function extensionFromMimeType(mimeType: string | undefined) {
+    const type = mimeType || "";
+    return MIME_EXTENSION_RULES.find(([token]) => type.includes(token))?.[1];
+}
+
+function groupStorageKeysByEngine(keys: Iterable<string>) {
+    const imageKeys: string[] = [];
+    const mediaKeys: string[] = [];
+
+    for (const key of new Set(keys)) {
+        const parsed = parseAssetMediaStorageKey(key);
+        if (!parsed) continue;
+        if (parsed.kind === "image") imageKeys.push(key);
+        else mediaKeys.push(key);
+    }
+
+    return { imageKeys, mediaKeys };
 }
 
 function engineForStorageKey(storageKey: string, adapter: AssetMediaStorageAdapter) {
     const parsed = parseAssetMediaStorageKey(storageKey);
     if (!parsed) throw new Error(`未知本地媒体 storageKey: ${storageKey}`);
-    return parsed.kind === "image" ? adapter.image : adapter.media;
+    return engineForStorageKind(parsed.kind, adapter);
+}
+
+function engineForStorageKind(kind: AssetMediaStorageKind, adapter: AssetMediaStorageAdapter) {
+    return kind === "image" ? adapter.image : adapter.media;
 }

@@ -13,6 +13,10 @@ function createTestStorage() {
                 return `blob:image:${storageKey}`;
             }),
             resolveUrl: vi.fn(async (storageKey, fallback = "") => (imageBlobs.has(storageKey) ? `blob:image:${storageKey}` : fallback)),
+            listStorageKeys: vi.fn(async () => [...imageBlobs.keys()]),
+            deleteStorageKeys: vi.fn(async (keys) => {
+                for (const key of keys) imageBlobs.delete(key);
+            }),
         },
         media: {
             readBlob: vi.fn(async (storageKey) => mediaBlobs.get(storageKey) || null),
@@ -21,6 +25,10 @@ function createTestStorage() {
                 return `blob:media:${storageKey}`;
             }),
             resolveUrl: vi.fn(async (storageKey, fallback = "") => (mediaBlobs.has(storageKey) ? `blob:media:${storageKey}` : fallback)),
+            listStorageKeys: vi.fn(async () => [...mediaBlobs.keys()]),
+            deleteStorageKeys: vi.fn(async (keys) => {
+                for (const key of keys) mediaBlobs.delete(key);
+            }),
         },
     });
     return { imageBlobs, mediaBlobs, storage };
@@ -35,15 +43,15 @@ describe("asset media storage", () => {
     });
 
     it("collects storage keys recursively without collecting storage-looking URL fragments", () => {
-        const keys = collectAssetMediaStorageKeys({
+        const nodeWithMediaRefs = { metadata: { storageKey: "video:node", refs: ["audio:ref", "https://cdn.test/file:not-local"] } };
+        const nestedReferenceKeys = ["audio-reference:shot", "blob:image:not-local", "plain text"];
+        const mediaGraph = {
             asset: { data: { storageKey: "image:asset" } },
-            nodes: [
-                { metadata: { storageKey: "video:node", refs: ["audio:ref", "https://cdn.test/file:not-local"] } },
-                "video-reference:shot",
-                ["audio-reference:shot", "blob:image:not-local", "plain text"],
-            ],
+            nodes: [nodeWithMediaRefs, "video-reference:shot", nestedReferenceKeys],
             ignored: { url: "https://example.test/image:asset", value: "not-a-key" },
-        });
+        };
+
+        const keys = collectAssetMediaStorageKeys(mediaGraph);
 
         expect([...keys].sort()).toEqual(["audio-reference:shot", "audio:ref", "image:asset", "video-reference:shot", "video:node"]);
     });
@@ -61,6 +69,20 @@ describe("asset media storage", () => {
         await expect(storage.resolveUrl("video:one", "fallback")).resolves.toBe("blob:media:video:one");
         expect(imageBlobs.has("image:one")).toBe(true);
         expect(mediaBlobs.has("video:one")).toBe(true);
+    });
+
+    it("lists and deletes keys through the matching backing stores", async () => {
+        const { storage } = createTestStorage();
+
+        await storage.writeBlob("image:one", new Blob(["image"], { type: "image/png" }));
+        await storage.writeBlob("audio:one", new Blob(["audio"], { type: "audio/mpeg" }));
+
+        expect((await storage.listStorageKeys()).sort()).toEqual(["audio:one", "image:one"]);
+
+        await storage.deleteStorageKeys(["image:one", "audio:one", "audio:one", "text:ignored"]);
+
+        await expect(storage.readBlob("image:one")).resolves.toBeNull();
+        await expect(storage.readBlob("audio:one")).resolves.toBeNull();
     });
 
     it("infers file extensions from mime type with storage-key fallbacks", () => {
