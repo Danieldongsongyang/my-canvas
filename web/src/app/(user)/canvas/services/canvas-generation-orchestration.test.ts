@@ -221,29 +221,27 @@ describe("canvas generation orchestration", () => {
     it("creates a new image asset and assetRef when retry succeeds without dropping render cache", async () => {
         const mediaAdapter = createMediaAdapter();
         const addAsset: CanvasAssetCreator = vi.fn(() => "asset-retry-new");
-        const existingNode = {
-            ...textNode({
-                id: "image-1",
-                type: CanvasNodeType.Image,
-                title: "旧图",
-                width: 320,
-                height: 240,
-                metadata: {
-                    content: "blob:old",
-                    storageKey: "image:old",
-                    status: "success" as const,
-                    prompt: "旧提示词",
-                    generationType: "generation" as const,
-                    model: "old-model",
-                    assetRef: {
-                        assetId: "asset-old",
-                        kind: "image" as const,
-                        role: "reference" as const,
-                        metadata: { source: "canvas-generation", canvasId: "canvas-1", nodeId: "image-1" },
-                    },
+        const existingNode = textNode({
+            id: "image-1",
+            type: CanvasNodeType.Image,
+            title: "旧图",
+            width: 320,
+            height: 240,
+            metadata: {
+                content: "blob:old",
+                storageKey: "image:old",
+                status: "success" as const,
+                prompt: "旧提示词",
+                generationType: "generation" as const,
+                model: "old-model",
+                assetRef: {
+                    assetId: "asset-old",
+                    kind: "image" as const,
+                    role: "reference" as const,
+                    metadata: { source: "canvas-generation", canvasId: "canvas-1", nodeId: "image-1" },
                 },
-            }),
-        };
+            },
+        });
         const requester: CanvasImageGenerationRequester = {
             generate: vi.fn(async () => [{ dataUrl: "data:image/png;base64,CCC" }]),
             edit: vi.fn(),

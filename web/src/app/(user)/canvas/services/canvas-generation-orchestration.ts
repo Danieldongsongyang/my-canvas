@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { requestEdit, requestGeneration } from "@/services/api/image";
+import type { UploadedImage } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
@@ -10,7 +11,7 @@ import { CanvasNodeType, type CanvasConnection, type CanvasImageGenerationType, 
 import { applyCanvasImageGenerationError, applyCanvasImageGenerationStart, applyCanvasImageGenerationSuccess, completeCanvasImageGeneration, type CanvasGenerationUiState } from "../utils/canvas-graph-mutations";
 import { fitNodeSize } from "../utils/canvas-node-size";
 import { buildImageGenerationMetadata, getGenerationCount, imageMetadata, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS } from "../[id]/canvas-page-utils";
-import { registerCanvasGeneratedImageAsset, type CanvasAssetCreator } from "./canvas-asset-intake";
+import { registerCanvasGeneratedImageAsset, type CanvasAssetCreator, type CanvasGeneratedImageAssetMetadataPatch } from "./canvas-asset-intake";
 import { materializeCanvasImageMedia, type CanvasNodeMediaAdapter } from "./canvas-node-media";
 
 export type CanvasImageGenerationRequester = {
@@ -71,6 +72,17 @@ export type CanvasGenerationAssetIntakeAdapter = {
     canvasId: string;
     addAsset: CanvasAssetCreator;
     now?: () => string;
+};
+
+type CanvasGeneratedImageAssetPatchInput = {
+    assetIntake?: CanvasGenerationAssetIntakeAdapter;
+    media: UploadedImage;
+    nodeId: string;
+    rootNodeId: string;
+    sourceNodeId?: string;
+    prompt: string;
+    generationConfig: AiConfig;
+    batchId?: string;
 };
 
 const defaultCanvasImageGenerationRequester: CanvasImageGenerationRequester = {
@@ -149,24 +161,16 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
                 const image = await requestOneImage({ requester, config: input.generationConfig, prompt: input.effectivePrompt, referenceImages: input.referenceImages });
                 const uploaded = await materializeCanvasImageMedia({ dataUrl: image.dataUrl }, input.mediaAdapter);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                const assetMetadataPatch = input.assetIntake
-                    ? registerCanvasGeneratedImageAsset({
-                          addAsset: input.assetIntake.addAsset,
-                          media: uploaded,
-                          context: {
-                              canvasId: input.assetIntake.canvasId,
-                              nodeId: targetNodeId,
-                              rootNodeId,
-                              sourceNodeId: input.sourceNodeId,
-                              prompt: input.effectivePrompt,
-                              model: input.generationConfig.model || input.generationConfig.imageModel,
-                              size: input.generationConfig.size,
-                              quality: input.generationConfig.quality,
-                              batchId: count > 1 ? rootNodeId : undefined,
-                              createdAt: input.assetIntake.now?.() || new Date().toISOString(),
-                          },
-                      }).metadataPatch
-                    : {};
+                const assetMetadataPatch = registerGeneratedImageAssetPatch({
+                    assetIntake: input.assetIntake,
+                    media: uploaded,
+                    nodeId: targetNodeId,
+                    rootNodeId,
+                    sourceNodeId: input.sourceNodeId,
+                    prompt: input.effectivePrompt,
+                    generationConfig: input.generationConfig,
+                    batchId: count > 1 ? rootNodeId : undefined,
+                });
                 nodes = applyCanvasImageGenerationSuccess({
                     nodes,
                     rootNodeId,
@@ -205,22 +209,14 @@ export async function retryCanvasGeneratedImage(input: CanvasGeneratedImageRetry
     const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
     const generationMetadata = retryGenerationMetadata(input);
     const rootNodeId = input.node.metadata?.batchRootId || input.node.id;
-    const assetMetadataPatch = input.assetIntake
-        ? registerCanvasGeneratedImageAsset({
-              addAsset: input.assetIntake.addAsset,
-              media: uploadedImage,
-              context: {
-                  canvasId: input.assetIntake.canvasId,
-                  nodeId: input.node.id,
-                  rootNodeId,
-                  prompt: input.prompt,
-                  model: input.generationConfig.model || input.generationConfig.imageModel,
-                  size: input.generationConfig.size,
-                  quality: input.generationConfig.quality,
-                  createdAt: input.assetIntake.now?.() || new Date().toISOString(),
-              },
-          }).metadataPatch
-        : {};
+    const assetMetadataPatch = registerGeneratedImageAssetPatch({
+        assetIntake: input.assetIntake,
+        media: uploadedImage,
+        nodeId: input.node.id,
+        rootNodeId,
+        prompt: input.prompt,
+        generationConfig: input.generationConfig,
+    });
 
     return applyCanvasImageGenerationSuccess({
         nodes: input.nodes,
@@ -230,6 +226,27 @@ export async function retryCanvasGeneratedImage(input: CanvasGeneratedImageRetry
         height: imageSize.height,
         metadata: { ...imageMetadata(uploadedImage), prompt: input.prompt, ...generationMetadata, ...assetMetadataPatch },
     });
+}
+
+function registerGeneratedImageAssetPatch(input: CanvasGeneratedImageAssetPatchInput): Partial<CanvasGeneratedImageAssetMetadataPatch> {
+    if (!input.assetIntake) return {};
+
+    return registerCanvasGeneratedImageAsset({
+        addAsset: input.assetIntake.addAsset,
+        media: input.media,
+        context: {
+            canvasId: input.assetIntake.canvasId,
+            nodeId: input.nodeId,
+            rootNodeId: input.rootNodeId,
+            sourceNodeId: input.sourceNodeId,
+            prompt: input.prompt,
+            model: input.generationConfig.model || input.generationConfig.imageModel,
+            size: input.generationConfig.size,
+            quality: input.generationConfig.quality,
+            batchId: input.batchId,
+            createdAt: input.assetIntake.now?.() || new Date().toISOString(),
+        },
+    }).metadataPatch;
 }
 
 function createRootImageNode(params: { id: string; sourceNode?: CanvasNodeData; prompt: string; count: number; childNodeIds: string[]; generationConfig: AiConfig; referenceImages: ReferenceImage[] }): CanvasNodeData {
