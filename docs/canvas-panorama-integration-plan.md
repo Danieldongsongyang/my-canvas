@@ -34,9 +34,12 @@
 - 全景策略 **Module** 固定放在 `web/src/app/(user)/canvas/services/canvas-panorama-policy.ts`。
 - 第一版接受在 `canvas-image-generation.ts` 里接入全景策略，不把生成编排大迁移作为 blocker。
 - 图片工具栏配置 key 直接从 `canvas-image-quick-tools-v7` 升到 `canvas-image-quick-tools-v8`，让默认工具集包含“全景”。
+- `panorama` 第一版主要表示 Canvas 图片节点的全景使用意图；当它出现在非图片生成源节点上时，表示从该节点发起的图片生成应按全景图生成，并作为持久的节点级生成偏好保留到用户手动关闭。它不是 asset 级认证属性，也不表示底层媒体已经通过 2:1 等距矩形校验。
 - 替换图片时保留原节点的 `panorama` 意图；用户可通过工具栏切回平面。
+- 从本地素材库重新插入图片时不自动恢复全景状态；新 Canvas 图片节点默认按普通图片处理，用户可通过工具栏切换为全景。
 - `AiConfig.size = "2:1"` 由后端配合支持，前端计划不再把该契约作为待确认前提。
 - 第一版不新增保存原始 prompt 的 metadata 字段；生成结果的 `metadata.prompt` 使用最终请求 prompt，确保重试不会丢失全景约束。
+- 全景图片执行图生视频时，第一版仍按普通参考图处理，不传播全景语义，不承诺 360 视频结果。
 
 ## 2. 第一版目标
 
@@ -57,6 +60,7 @@
 - 复用 `CanvasNodeType.Image`，不新增全景节点类型。
 - 复用 `CanvasNodeMetadata.panorama?: boolean`，不新增 projection / yaw / pitch / fov 字段。
 - 生成配置里的“全景图”开关影响生成请求和生成结果。
+- 生成源节点上的“全景图”开关是持久偏好，亮 / 暗状态直接反馈该节点后续是否继续生成全景图。
 - 全景生成请求使用 2:1 尺寸，并给 prompt 增加 equirectangular / seamless wrap 约束。
 - 图片详情弹窗根据 `metadata.panorama` 切换普通图片查看或全景查看。
 - 图片节点缩略图仍渲染普通 `<img>`，只增加低干扰“全景”标识。
@@ -67,6 +71,7 @@
 - 不在画布节点内初始化 WebGL 全景预览。
 - 不做多场景 tour、热点、地图、楼层切换。
 - 不做 cubemap、tiles、360 视频。
+- 不让“图生视频”继承全景语义；全景图片可以作为普通参考图生成普通视频。
 - 不自研 WebGL 球面投影。
 - 不抽 `PanoramaProvider` / `PanoramaRuntime`。当前只有 Photo Sphere Viewer 一个生产 **Adapter**，这个 **Seam** 不真实。
 
@@ -492,6 +497,13 @@ onTogglePanorama: (node: CanvasNodeData) => void;
 - `active`: `isPanoramaNode(node)`
 - icon：优先用 `lucide-react` 的 `Orbit`，如果不可用再选接近环视语义的图标。
 
+交互语义：
+
+- 图标亮色表示该节点当前会按全景图处理。
+- 图标暗色表示该节点当前按普通图片或普通生成源处理。
+- 对非图片生成源节点，亮色表示后续从该节点发起的图片生成会继续生成全景图，直到用户手动关闭。
+- 生成完成后不要自动关闭源节点上的全景开关。
+
 页面 handler：
 
 ```ts
@@ -523,6 +535,17 @@ const toggleNodePanorama = useCallback((nodeId: string) => {
 
 不要在 `canvas-node-media.ts` 里判断图片比例或清理全景状态。这个判断属于全景 policy，不属于媒体存储 **Module**。
 
+### 7.5 从素材库重新插入图片
+
+从本地素材库重新插入一张曾经在画布里按全景使用过的图片时，第一版不自动恢复全景状态：
+
+- 新 Canvas 图片节点默认按普通图片处理。
+- 用户可以通过图片工具栏切换为“全景”。
+- 不给本地素材库 asset 增加全景 metadata。
+- 不根据历史 Canvas 节点反推 asset 是否应该是全景素材。
+
+原因：`panorama` 是 Canvas 节点意图，不是 asset 级认证属性。同一个 asset 可以在一个 Canvas 节点按全景图使用，在另一个 Canvas 节点按普通图片使用。
+
 ## 8. 数据模型
 
 第一版只使用现有字段：
@@ -530,6 +553,16 @@ const toggleNodePanorama = useCallback((nodeId: string) => {
 ```ts
 panorama?: boolean;
 ```
+
+这个字段在第一版的语义由节点角色决定：
+
+- 在图片节点上，它表示该 Canvas 图片节点按全景图标记和查看。
+- 在文本节点、配置节点等非图片生成源节点上，它表示从该节点发起的图片生成应按全景图生成。
+- 非图片生成源节点上的 `panorama` 是持久的节点级生成偏好，不是一次性生成参数；生成完成后不自动关闭。
+- 生成完成后，这个意图会落到输出图片节点上，成为图片节点的全景使用意图。
+- 它不是本地素材库 asset 的全景认证属性。
+- 它不表示底层媒体已经被系统验证为合格的 2:1 等距矩形全景文件。
+- 同一个 asset 如果被多个 Canvas 节点引用，可以在一个节点按全景图使用，在另一个节点按普通图片使用。
 
 暂时不新增：
 
@@ -748,6 +781,7 @@ export async function generateCanvasImageOnCanvas(
 - 批量图选择主图后，root 仍保持全景状态。
 - 全景详情里滚轮、拖拽、双击不影响底层画布。
 - 下载、保存素材、以图生图、图生视频不回退。
+- 图生视频仍把全景图片当普通参考图使用，不自动生成或承诺 360 视频。
 
 测试验收：
 

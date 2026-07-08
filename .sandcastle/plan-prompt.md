@@ -14,6 +14,8 @@ The list above has already been filtered to issues ready for work.
 
 Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
 
+Do not select parent PRD, tracking, or umbrella issues for implementation, even if they have a ready label. Issues whose titles start with `PRD:` or whose bodies primarily describe a parent plan should only be used as context for their child implementation issues.
+
 An issue B is **blocked by** issue A if:
 
 - B requires code or infrastructure that A introduces

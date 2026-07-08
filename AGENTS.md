@@ -48,3 +48,17 @@
 
 ## Lumenx位置
 /Users/a1/Desktop/无限画布项目汇总/lumenx/frontend
+
+## Agent skills
+
+### Issue tracker
+
+Issues 使用 GitHub Issues；外部 PR 不作为 triage 入口。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage 标签使用默认 canonical vocabulary：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain docs 采用 single-context 布局：根目录 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
