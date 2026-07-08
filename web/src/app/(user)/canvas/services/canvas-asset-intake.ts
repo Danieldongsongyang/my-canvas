@@ -25,16 +25,33 @@ export type CanvasGeneratedImageAssetInput = {
     context: CanvasGeneratedImageAssetContext;
 };
 
+export type CanvasGeneratedImageAssetMetadataPatch = Required<Pick<CanvasNodeMetadata, "assetRef">>;
+
+type CanvasGeneratedImageAssetMetadata = {
+    source: "canvas-generation";
+    canvasRole: "generated";
+    canvasId: string;
+    nodeId: string;
+    rootNodeId?: string;
+    sourceNodeId?: string;
+    prompt?: string;
+    model?: string;
+    size?: string;
+    quality?: string;
+    batchId?: string;
+    createdAt?: string;
+};
+
 export type CanvasGeneratedImageAssetResult = {
     assetId: string;
     assetRef: AssetRef;
-    metadataPatch: CanvasNodeMetadata;
+    metadataPatch: CanvasGeneratedImageAssetMetadataPatch;
 };
 
 const CANVAS_ASSET_TITLE_LIMIT = 32;
 
 export function registerCanvasGeneratedImageAsset(input: CanvasGeneratedImageAssetInput): CanvasGeneratedImageAssetResult {
-    const metadata = canvasGeneratedImageMetadata(input);
+    const metadata = canvasGeneratedImageMetadata(input.context);
     const assetId = input.addAsset({
         kind: "image",
         title: generatedAssetTitle(input.context.prompt),
@@ -68,20 +85,20 @@ export function registerCanvasGeneratedImageAsset(input: CanvasGeneratedImageAss
     };
 }
 
-function canvasGeneratedImageMetadata(input: CanvasGeneratedImageAssetInput) {
+function canvasGeneratedImageMetadata(context: CanvasGeneratedImageAssetContext): CanvasGeneratedImageAssetMetadata {
     return {
         source: "canvas-generation",
         canvasRole: "generated",
-        canvasId: input.context.canvasId,
-        nodeId: input.context.nodeId,
-        rootNodeId: input.context.rootNodeId,
-        sourceNodeId: input.context.sourceNodeId,
-        prompt: input.context.prompt,
-        model: input.context.model,
-        size: input.context.size,
-        quality: input.context.quality,
-        batchId: input.context.batchId,
-        createdAt: input.context.createdAt,
+        canvasId: context.canvasId,
+        nodeId: context.nodeId,
+        rootNodeId: context.rootNodeId,
+        sourceNodeId: context.sourceNodeId,
+        prompt: context.prompt,
+        model: context.model,
+        size: context.size,
+        quality: context.quality,
+        batchId: context.batchId,
+        createdAt: context.createdAt,
     };
 }
 

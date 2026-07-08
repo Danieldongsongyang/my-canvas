@@ -167,7 +167,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                     : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                const assetMetadata = registerCanvasGeneratedImageAsset({
+                const assetMetadataPatch = registerCanvasGeneratedImageAsset({
                     addAsset: deps.addAsset,
                     media: uploaded,
                     context: {
@@ -194,7 +194,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                 width: imageSize.width,
                                 height: imageSize.height,
-                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadata, primaryImageId: targetId },
+                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadataPatch, primaryImageId: targetId },
                             };
                         if (node.id === targetId)
                             return {
@@ -202,7 +202,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                 width: imageSize.width,
                                 height: imageSize.height,
-                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadata },
+                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadataPatch },
                             };
                         return node;
                     });

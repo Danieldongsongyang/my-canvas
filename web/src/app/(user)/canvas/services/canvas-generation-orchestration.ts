@@ -148,7 +148,7 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
                 const image = await requestOneImage({ requester, config: input.generationConfig, prompt: input.effectivePrompt, referenceImages: input.referenceImages });
                 const uploaded = await materializeCanvasImageMedia({ dataUrl: image.dataUrl }, input.mediaAdapter);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                const assetMetadata = input.assetIntake
+                const assetMetadataPatch = input.assetIntake
                     ? registerCanvasGeneratedImageAsset({
                           addAsset: input.assetIntake.addAsset,
                           media: uploaded,
@@ -172,8 +172,7 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
                     targetNodeId,
                     width: imageSize.width,
                     height: imageSize.height,
-                    // Asset creation is intentionally not rolled back if later graph patching fails in this first slice.
-                    metadata: { ...imageMetadata(uploaded), ...assetMetadata },
+                    metadata: { ...imageMetadata(uploaded), ...assetMetadataPatch },
                 });
                 hasSuccess = true;
             } catch (error) {
