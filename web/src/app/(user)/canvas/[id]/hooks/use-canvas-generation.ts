@@ -182,6 +182,8 @@ export function useCanvasGeneration({
                     retryImages: retryReferenceImages || [],
                     useReferenceImages,
                     savedImageMetadata,
+                    canvasId,
+                    addAsset,
                     setNodes,
                 });
             } catch (error) {
@@ -192,7 +194,7 @@ export function useCanvasGeneration({
                 setRunningNodeId(null);
             }
         },
-        [connectionsRef, effectiveConfig, isAiConfigReady, message, nodesRef, openConfigDialog, setNodes, setRunningNodeId],
+        [addAsset, canvasId, connectionsRef, effectiveConfig, isAiConfigReady, message, nodesRef, openConfigDialog, setNodes, setRunningNodeId],
     );
 
     const generateImageFromTextNode = useCallback(
