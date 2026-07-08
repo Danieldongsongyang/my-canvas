@@ -6,8 +6,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { checkAssetDeletion, type AssetDeletionCheck } from "@/services/asset-references";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { resolveMediaUrl } from "@/services/file-storage";
+import { assetMediaStorage, uploadAssetImage } from "@/services/asset-media-storage";
 import { studioRepository } from "@/services/studio-local";
 import { cleanupUnusedCanvasNodeMedia } from "@/app/(user)/canvas/services/canvas-node-media";
 
@@ -49,16 +48,16 @@ const assetStorage: PersistStorage<AssetStore> = {
         const parsed = JSON.parse(value) as StorageValue<AssetStore>;
         parsed.state.assets = await Promise.all(
             parsed.state.assets.map(async (asset) => {
-                if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await resolveMediaUrl(asset.data.storageKey, asset.data.url) } };
+                if (asset.kind === "video" && asset.data.storageKey) return { ...asset, data: { ...asset.data, url: await assetMediaStorage.resolveUrl(asset.data.storageKey, asset.data.url) } };
                 if (asset.kind !== "image") return asset;
                 if (asset.data.storageKey)
                     return {
                         ...asset,
-                        coverUrl: asset.coverUrl.startsWith("blob:") ? await resolveImageUrl(asset.data.storageKey, asset.coverUrl) : asset.coverUrl,
-                        data: { ...asset.data, dataUrl: await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl) },
+                        coverUrl: asset.coverUrl.startsWith("blob:") ? await assetMediaStorage.resolveUrl(asset.data.storageKey, asset.coverUrl) : asset.coverUrl,
+                        data: { ...asset.data, dataUrl: await assetMediaStorage.resolveUrl(asset.data.storageKey, asset.data.dataUrl) },
                     };
                 if (!asset.data.dataUrl.startsWith("data:image/")) return asset;
-                const image = await uploadImage(asset.data.dataUrl);
+                const image = await uploadAssetImage(asset.data.dataUrl);
                 return { ...asset, coverUrl: asset.coverUrl.startsWith("data:image/") ? image.url : asset.coverUrl, data: { ...asset.data, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, mimeType: image.mimeType } };
             }),
         );

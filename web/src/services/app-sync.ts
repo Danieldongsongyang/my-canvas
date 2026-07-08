@@ -1,7 +1,6 @@
 "use client";
 
-import { getMediaBlob, resolveMediaUrl, setMediaBlob } from "@/services/file-storage";
-import { getImageBlob, resolveImageUrl, setImageBlob } from "@/services/image-storage";
+import { assetMediaStorage, collectAssetMediaStorageKeys, inferAssetMediaFileExtension } from "@/services/asset-media-storage";
 import { downloadWebdavFile, uploadWebdavFile, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import type { Asset } from "@/stores/use-asset-store";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -71,8 +70,6 @@ export type AppSyncProgressEvent = {
 export type AppSyncProgress = (event: AppSyncProgressEvent) => void;
 
 const FILE_CONCURRENCY = 3;
-const storageKeyPattern = /^(image|video|audio|file|video-reference|audio-reference):/;
-
 export async function syncAppDataToWebdav(config: WebdavSyncConfig, onProgress?: AppSyncProgress): Promise<AppSyncResult> {
     emitProgress(onProgress, { stage: "等待本地数据加载" });
     await Promise.all([waitForHydration(useCanvasStore), waitForHydration(useAssetStore)]);
@@ -165,10 +162,10 @@ async function readDomainManifest<T>(config: WebdavSyncConfig, domain: DomainKey
 async function downloadMissingFiles<T>(config: WebdavSyncConfig, domain: DomainKey, data: T, remoteFiles: AppSyncFile[], onProgress?: AppSyncProgress) {
     const remoteFileMap = new Map(remoteFiles.map((item) => [item.storageKey, item]));
     const tasks: AppSyncFile[] = [];
-    const storageKeys = collectStorageKeys(data);
+    const storageKeys = [...collectAssetMediaStorageKeys(data)];
     let scanned = 0;
     for (const storageKey of storageKeys) {
-        const localBlob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
+        const localBlob = await assetMediaStorage.readBlob(storageKey);
         scanned += 1;
         if (localBlob) {
             emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "检查缺失媒体", current: scanned, total: storageKeys.length, status: "active" });
@@ -187,7 +184,7 @@ async function downloadMissingFiles<T>(config: WebdavSyncConfig, domain: DomainK
         const blob = await downloadWebdavFile(config, remoteFile.path);
         if (!blob) return;
         const typedBlob = blob.type ? blob : blob.slice(0, blob.size, remoteFile.mimeType);
-        await (remoteFile.storageKey.startsWith("image:") ? setImageBlob(remoteFile.storageKey, typedBlob) : setMediaBlob(remoteFile.storageKey, typedBlob));
+        await assetMediaStorage.writeBlob(remoteFile.storageKey, typedBlob);
         downloaded += 1;
         emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "下载媒体", current: downloaded, total: tasks.length, status: "active" });
     });
@@ -200,10 +197,10 @@ async function uploadChangedFiles<T>(config: WebdavSyncConfig, domain: DomainKey
     let uploadedFiles = 0;
     let uploadedBytes = 0;
 
-    const storageKeys = collectStorageKeys(data);
+    const storageKeys = [...collectAssetMediaStorageKeys(data)];
     let scanned = 0;
     for (const storageKey of storageKeys) {
-        const blob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
+        const blob = await assetMediaStorage.readBlob(storageKey);
         const remoteFile = remoteFileMap.get(storageKey);
         if (!blob) {
             if (remoteFile) files.push(remoteFile);
@@ -213,7 +210,7 @@ async function uploadChangedFiles<T>(config: WebdavSyncConfig, domain: DomainKey
         }
         const item: AppSyncFile = {
             storageKey,
-            path: remoteFile?.path || domainPath(domain, `files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`),
+            path: remoteFile?.path || domainPath(domain, `files/${safeFileName(storageKey)}.${inferAssetMediaFileExtension(blob.type, storageKey)}`),
             mimeType: blob.type || remoteFile?.mimeType || "application/octet-stream",
             bytes: blob.size,
         };
@@ -240,11 +237,11 @@ async function uploadChangedFiles<T>(config: WebdavSyncConfig, domain: DomainKey
 
 async function hydrateAsset(asset: Asset): Promise<Asset> {
     if (asset.kind === "image" && asset.data.storageKey) {
-        const dataUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl);
+        const dataUrl = await assetMediaStorage.resolveUrl(asset.data.storageKey, asset.data.dataUrl);
         return { ...asset, coverUrl: asset.coverUrl.startsWith("blob:") ? dataUrl : asset.coverUrl, data: { ...asset.data, dataUrl } };
     }
     if (asset.kind === "video" && asset.data.storageKey) {
-        const url = await resolveMediaUrl(asset.data.storageKey, asset.data.url);
+        const url = await assetMediaStorage.resolveUrl(asset.data.storageKey, asset.data.url);
         return { ...asset, coverUrl: asset.coverUrl.startsWith("blob:") ? url : asset.coverUrl, data: { ...asset.data, url } };
     }
     return asset;
@@ -263,17 +260,6 @@ function mergeById<T extends { id?: string }>(local: T[], remote: T[], timeKey: 
         if (!current || getTime(item as Record<string, unknown>, timeKey) >= getTime(current as Record<string, unknown>, timeKey)) items.set(id, item);
     });
     return Array.from(items.values()).sort((a, b) => getTime(b as Record<string, unknown>, timeKey) - getTime(a as Record<string, unknown>, timeKey));
-}
-
-function collectStorageKeys(value: unknown, keys = new Set<string>()) {
-    if (typeof value === "string") {
-        if (storageKeyPattern.test(value)) keys.add(value);
-        return [...keys];
-    }
-    if (!value || typeof value !== "object") return [...keys];
-    if ("storageKey" in value && typeof value.storageKey === "string" && storageKeyPattern.test(value.storageKey)) keys.add(value.storageKey);
-    Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectStorageKeys(child, keys)) : collectStorageKeys(item, keys)));
-    return [...keys];
 }
 
 function domainPath(domain: DomainKey, path: string) {
@@ -298,18 +284,6 @@ function getTime(item: Record<string, unknown>, key: string) {
 
 function safeFileName(value: string) {
     return value.replace(/[\\/:*?"<>|]/g, "_");
-}
-
-function fileExtension(mimeType: string, storageKey: string) {
-    if (mimeType.includes("png")) return "png";
-    if (mimeType.includes("jpeg")) return "jpg";
-    if (mimeType.includes("webp")) return "webp";
-    if (mimeType.includes("gif")) return "gif";
-    if (mimeType.includes("mp4")) return "mp4";
-    if (mimeType.includes("webm")) return "webm";
-    if (mimeType.includes("wav")) return "wav";
-    if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
-    return storageKey.startsWith("image:") ? "png" : "bin";
 }
 
 function waitForHydration<T extends { hydrated: boolean }>(store: { getState: () => T; subscribe: (listener: (state: T) => void) => () => void }) {
