@@ -857,6 +857,8 @@ function InfiniteCanvasPage() {
 
     const { handleGenerateNode, handleRetryNode, generateImageFromTextNode } = useCanvasGeneration({
         effectiveConfig,
+        canvasId: projectId,
+        addAsset,
         isAiConfigReady,
         openConfigDialog,
         nodesRef,

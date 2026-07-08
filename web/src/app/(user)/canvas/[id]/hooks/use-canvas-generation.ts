@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 
 import type { AiConfig } from "@/stores/use-config-store";
+import type { CanvasAssetCreator } from "../../services/canvas-asset-intake";
 
 import { getNodeSpec } from "../../constants";
 import type { CanvasNodeGenerationMode } from "../../components/canvas-node-prompt-panel";
@@ -17,6 +18,8 @@ import type { CanvasGenerationMessage } from "./canvas-generation-types";
 
 type UseCanvasGenerationParams = {
     effectiveConfig: AiConfig;
+    canvasId: string;
+    addAsset: CanvasAssetCreator;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     nodesRef: MutableRefObject<CanvasNodeData[]>;
@@ -32,6 +35,8 @@ type UseCanvasGenerationParams = {
 
 export function useCanvasGeneration({
     effectiveConfig,
+    canvasId,
+    addAsset,
     isAiConfigReady,
     openConfigDialog,
     nodesRef,
@@ -76,7 +81,7 @@ export function useCanvasGeneration({
             try {
                 const branchParams = { nodeId, prompt, effectivePrompt, sourceNode, generationConfig, generationContext, setPendingChildIds };
                 if (mode === "image") {
-                    await generateCanvasImage(branchParams, { nodes: nodesRef.current, connections: connectionsRef.current, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, message });
+                    await generateCanvasImage(branchParams, { nodes: nodesRef.current, connections: connectionsRef.current, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, message, canvasId, addAsset });
                     return;
                 }
                 if (mode === "video") {
@@ -98,7 +103,7 @@ export function useCanvasGeneration({
                 setRunningNodeId(null);
             }
         },
-        [connectionsRef, effectiveConfig, isAiConfigReady, message, nodesRef, openConfigDialog, setConnections, setDialogNodeId, setNodes, setRunningNodeId, setSelectedConnectionId, setSelectedNodeIds],
+        [addAsset, canvasId, connectionsRef, effectiveConfig, isAiConfigReady, message, nodesRef, openConfigDialog, setConnections, setDialogNodeId, setNodes, setRunningNodeId, setSelectedConnectionId, setSelectedNodeIds],
     );
 
     const handleRetryNode = useCallback(

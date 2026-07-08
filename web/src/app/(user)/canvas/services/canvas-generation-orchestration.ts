@@ -10,6 +10,7 @@ import { CanvasNodeType, type CanvasConnection, type CanvasImageGenerationType, 
 import { applyCanvasImageGenerationError, applyCanvasImageGenerationStart, applyCanvasImageGenerationSuccess, completeCanvasImageGeneration, type CanvasGenerationUiState } from "../utils/canvas-graph-mutations";
 import { fitNodeSize } from "../utils/canvas-node-size";
 import { buildImageGenerationMetadata, getGenerationCount, imageMetadata, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS } from "../[id]/canvas-page-utils";
+import { registerCanvasGeneratedImageAsset, type CanvasAssetCreator } from "./canvas-asset-intake";
 import { materializeCanvasImageMedia, type CanvasNodeMediaAdapter } from "./canvas-node-media";
 
 export type CanvasImageGenerationRequester = {
@@ -30,6 +31,7 @@ export type CanvasTextToImageGenerationInput = {
     onStart?: (state: CanvasTextToImageGenerationStartState) => void;
     requester?: CanvasImageGenerationRequester;
     mediaAdapter?: CanvasNodeMediaAdapter;
+    assetIntake?: CanvasGenerationAssetIntakeAdapter;
 };
 
 export type CanvasTextToImageGenerationStartState = {
@@ -62,6 +64,12 @@ export type CanvasGeneratedImageRetryInput = {
     savedImageMetadata?: CanvasNodeMetadata;
     requester?: CanvasImageGenerationRequester;
     mediaAdapter?: CanvasNodeMediaAdapter;
+};
+
+export type CanvasGenerationAssetIntakeAdapter = {
+    canvasId: string;
+    addAsset: CanvasAssetCreator;
+    now?: () => string;
 };
 
 const defaultCanvasImageGenerationRequester: CanvasImageGenerationRequester = {
@@ -140,13 +148,32 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
                 const image = await requestOneImage({ requester, config: input.generationConfig, prompt: input.effectivePrompt, referenceImages: input.referenceImages });
                 const uploaded = await materializeCanvasImageMedia({ dataUrl: image.dataUrl }, input.mediaAdapter);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                const assetMetadata = input.assetIntake
+                    ? registerCanvasGeneratedImageAsset({
+                          addAsset: input.assetIntake.addAsset,
+                          media: uploaded,
+                          context: {
+                              canvasId: input.assetIntake.canvasId,
+                              nodeId: targetNodeId,
+                              rootNodeId,
+                              sourceNodeId: input.sourceNodeId,
+                              prompt: input.effectivePrompt,
+                              model: input.generationConfig.model || input.generationConfig.imageModel,
+                              size: input.generationConfig.size,
+                              quality: input.generationConfig.quality,
+                              batchId: count > 1 ? rootNodeId : undefined,
+                              createdAt: input.assetIntake.now?.() || new Date().toISOString(),
+                          },
+                      }).metadataPatch
+                    : {};
                 nodes = applyCanvasImageGenerationSuccess({
                     nodes,
                     rootNodeId,
                     targetNodeId,
                     width: imageSize.width,
                     height: imageSize.height,
-                    metadata: imageMetadata(uploaded),
+                    // Asset creation is intentionally not rolled back if later graph patching fails in this first slice.
+                    metadata: { ...imageMetadata(uploaded), ...assetMetadata },
                 });
                 hasSuccess = true;
             } catch (error) {

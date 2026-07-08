@@ -4,6 +4,7 @@ import { defaultConfig } from "@/stores/use-config-store";
 
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
 import { generateCanvasTextToImage, retryCanvasGeneratedImage, type CanvasImageGenerationRequester } from "./canvas-generation-orchestration";
+import type { CanvasAssetCreator } from "./canvas-asset-intake";
 import type { CanvasNodeMediaAdapter } from "./canvas-node-media";
 
 function textNode(overrides: Partial<CanvasNodeData> = {}): CanvasNodeData {
@@ -63,6 +64,7 @@ describe("canvas generation orchestration", () => {
             edit: vi.fn(),
         };
         const mediaAdapter = createMediaAdapter();
+        const addAsset: CanvasAssetCreator = vi.fn(() => "asset-1");
         const onStart = vi.fn();
 
         const pendingResult = generateCanvasTextToImage({
@@ -77,6 +79,11 @@ describe("canvas generation orchestration", () => {
             createConnectionId: ids("conn-text-image"),
             requester,
             mediaAdapter,
+            assetIntake: {
+                canvasId: "canvas-1",
+                addAsset,
+                now: () => "2026-07-03T10:00:00.000Z",
+            },
             onStart,
         });
 
@@ -93,6 +100,14 @@ describe("canvas generation orchestration", () => {
 
         expect(requester.generate).toHaveBeenCalledWith(expect.objectContaining({ count: "1", model: "image-model" }), "一只白色茶杯，产品摄影");
         expect(mediaAdapter.image.upload).toHaveBeenCalledWith("data:image/png;base64,AAA");
+        expect(addAsset).toHaveBeenCalledWith(
+            expect.objectContaining({
+                kind: "image",
+                coverUrl: "blob:AAA",
+                data: expect.objectContaining({ dataUrl: "blob:AAA", storageKey: "image:AAA", width: 1024, height: 768 }),
+                metadata: expect.objectContaining({ source: "canvas-generation", canvasRole: "generated", canvasId: "canvas-1", nodeId: "image-1", sourceNodeId: "text-1" }),
+            }),
+        );
         expect(result.connections).toEqual<CanvasConnection[]>([{ id: "conn-text-image", fromNodeId: "text-1", toNodeId: "image-1" }]);
         expect(result.nodes[0]).toMatchObject({ id: "text-1", type: CanvasNodeType.Text, metadata: { content: "一只白色茶杯", prompt: "一只白色茶杯", status: "success" } });
         expect(result.nodes[1]).toMatchObject({
@@ -105,6 +120,16 @@ describe("canvas generation orchestration", () => {
                 prompt: "一只白色茶杯，产品摄影",
                 generationType: "generation",
                 primaryImageId: "image-1",
+                assetRef: {
+                    assetId: "asset-1",
+                    kind: "image",
+                    role: "reference",
+                    metadata: expect.objectContaining({
+                        source: "canvas-generation",
+                        canvasRole: "generated",
+                        storageKey: "image:AAA",
+                    }),
+                },
             },
         });
         expect(result.uiState.selectedNodeIds).toEqual(new Set(["text-1"]));

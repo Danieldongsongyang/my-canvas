@@ -12,11 +12,14 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Canvas
 import { NODE_STATUS_ERROR, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS, buildImageGenerationMetadata, imageMetadata } from "../canvas-page-utils";
 import type { CanvasGenerateBranchParams, CanvasGenerationMessage, CanvasGenerationSetters } from "./canvas-generation-types";
 import { generateCanvasTextToImage, retryCanvasGeneratedImage } from "../../services/canvas-generation-orchestration";
+import { registerCanvasGeneratedImageAsset, type CanvasAssetCreator } from "../../services/canvas-asset-intake";
 
 type ImageGenerationDeps = Pick<CanvasGenerationSetters, "setNodes" | "setConnections" | "setSelectedNodeIds" | "setSelectedConnectionId" | "setDialogNodeId"> & {
     message: CanvasGenerationMessage;
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
+    canvasId: string;
+    addAsset: CanvasAssetCreator;
 };
 
 export async function generateCanvasImage(params: CanvasGenerateBranchParams, deps: ImageGenerationDeps) {
@@ -43,6 +46,10 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
             effectivePrompt,
             generationConfig,
             referenceImages,
+            assetIntake: {
+                canvasId: deps.canvasId,
+                addAsset: deps.addAsset,
+            },
             onStart: (state) => {
                 setPendingChildIds(state.pendingNodeIds);
                 setNodes(state.nodes);
@@ -160,6 +167,22 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                     : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                const assetMetadata = registerCanvasGeneratedImageAsset({
+                    addAsset: deps.addAsset,
+                    media: uploaded,
+                    context: {
+                        canvasId: deps.canvasId,
+                        nodeId: targetId,
+                        rootNodeId: rootId,
+                        sourceNodeId: nodeId,
+                        prompt: effectivePrompt,
+                        model: generationConfig.model || generationConfig.imageModel,
+                        size: generationConfig.size,
+                        quality: generationConfig.quality,
+                        batchId: count > 1 ? rootId : undefined,
+                        createdAt: new Date().toISOString(),
+                    },
+                }).metadataPatch;
                 setNodes((prev) => {
                     const root = prev.find((node) => node.id === rootId);
                     return prev.map((node) => {
@@ -171,7 +194,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                 width: imageSize.width,
                                 height: imageSize.height,
-                                metadata: { ...node.metadata, ...imageMetadata(uploaded), primaryImageId: targetId },
+                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadata, primaryImageId: targetId },
                             };
                         if (node.id === targetId)
                             return {
@@ -179,7 +202,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                 width: imageSize.width,
                                 height: imageSize.height,
-                                metadata: { ...node.metadata, ...imageMetadata(uploaded) },
+                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadata },
                             };
                         return node;
                     });
