@@ -252,9 +252,23 @@ export async function retryCanvasImage(params: {
     retryImages: ReferenceImage[];
     useReferenceImages: boolean;
     savedImageMetadata?: CanvasNodeMetadata;
+    canvasId: string;
+    addAsset: CanvasAssetCreator;
     setNodes: CanvasGenerationSetters["setNodes"];
 }) {
-    const { node, nodes, prompt, generationConfig, retryImages, useReferenceImages, savedImageMetadata, setNodes } = params;
-    const nextNodes = await retryCanvasGeneratedImage({ nodes, node, prompt, generationConfig, retryImages, useReferenceImages, savedImageMetadata });
+    const { node, nodes, prompt, generationConfig, retryImages, useReferenceImages, savedImageMetadata, canvasId, addAsset, setNodes } = params;
+    const nextNodes = await retryCanvasGeneratedImage({
+        nodes,
+        node,
+        prompt,
+        generationConfig,
+        retryImages,
+        useReferenceImages,
+        savedImageMetadata,
+        assetIntake: {
+            canvasId,
+            addAsset,
+        },
+    });
     setNodes(nextNodes);
 }

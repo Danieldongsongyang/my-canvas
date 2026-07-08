@@ -64,6 +64,7 @@ export type CanvasGeneratedImageRetryInput = {
     savedImageMetadata?: CanvasNodeMetadata;
     requester?: CanvasImageGenerationRequester;
     mediaAdapter?: CanvasNodeMediaAdapter;
+    assetIntake?: CanvasGenerationAssetIntakeAdapter;
 };
 
 export type CanvasGenerationAssetIntakeAdapter = {
@@ -203,14 +204,31 @@ export async function retryCanvasGeneratedImage(input: CanvasGeneratedImageRetry
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
     const generationMetadata = retryGenerationMetadata(input);
+    const rootNodeId = input.node.metadata?.batchRootId || input.node.id;
+    const assetMetadataPatch = input.assetIntake
+        ? registerCanvasGeneratedImageAsset({
+              addAsset: input.assetIntake.addAsset,
+              media: uploadedImage,
+              context: {
+                  canvasId: input.assetIntake.canvasId,
+                  nodeId: input.node.id,
+                  rootNodeId,
+                  prompt: input.prompt,
+                  model: input.generationConfig.model || input.generationConfig.imageModel,
+                  size: input.generationConfig.size,
+                  quality: input.generationConfig.quality,
+                  createdAt: input.assetIntake.now?.() || new Date().toISOString(),
+              },
+          }).metadataPatch
+        : {};
 
     return applyCanvasImageGenerationSuccess({
         nodes: input.nodes,
-        rootNodeId: input.node.metadata?.batchRootId || input.node.id,
+        rootNodeId,
         targetNodeId: input.node.id,
         width: imageSize.width,
         height: imageSize.height,
-        metadata: { ...imageMetadata(uploadedImage), prompt: input.prompt, ...generationMetadata },
+        metadata: { ...imageMetadata(uploadedImage), prompt: input.prompt, ...generationMetadata, ...assetMetadataPatch },
     });
 }
 
