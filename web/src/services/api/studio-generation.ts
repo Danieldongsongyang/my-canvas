@@ -739,8 +739,8 @@ async function defaultRequestEdit(config: AiConfig, prompt: string, references: 
 }
 
 async function defaultStoreImage(dataUrl: string) {
-    const { uploadImage } = await import("@/services/image-storage");
-    return uploadImage(dataUrl);
+    const { uploadAssetImage } = await import("@/services/asset-media-storage");
+    return uploadAssetImage(dataUrl);
 }
 
 function readStudioArtDirection(episode: StudioEpisode): StudioArtDirectionSnapshot | null {
