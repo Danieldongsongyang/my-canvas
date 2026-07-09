@@ -1,4 +1,9 @@
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ContextMenuState, type Position } from "../types";
+import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
+import type { AiConfig } from "@/stores/use-config-store";
+
+import { getNodeSpec } from "../constants";
+import { isCanvasPanoramaEnabled } from "../services/canvas-panorama-policy";
+import { CanvasNodeType, type CanvasConnection, type CanvasImageWorkflowAction, type CanvasNodeData, type CanvasNodeMetadata, type ContextMenuState, type Position } from "../types";
 
 export type CanvasUploadUiState = {
     selectedNodeIds: Set<string>;
@@ -73,6 +78,24 @@ export type CanvasImageGenerationSuccessInput = {
 export type CanvasBatchPrimaryImageInput = {
     nodes: CanvasNodeData[];
     child: CanvasNodeData;
+};
+
+export type CanvasImageWorkflowInput = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    sourceNode: CanvasNodeData;
+    workflow: CanvasImageWorkflowAction;
+    config: AiConfig;
+    sourcePatch?: Partial<CanvasNodeData>;
+    createNodeId?: (type: CanvasNodeType.Image | CanvasNodeType.Video) => string;
+    createConnectionId?: () => string;
+};
+
+export type CanvasImageWorkflowResult = {
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    childNode: CanvasNodeData;
+    uiState: CanvasUploadUiState;
 };
 
 export function applyCanvasImageGenerationStart({ nodes, connections, sourceNodeId, sourcePatch, generatedNodes, generatedConnections, dialogNodeId }: CanvasImageGenerationStartInput): CanvasImageGenerationStartResult {
@@ -151,6 +174,107 @@ export function applyCanvasBatchPrimaryImage({ nodes, child }: CanvasBatchPrimar
             metadata: { ...node.metadata, ...rootMetadataPatch },
         };
     });
+}
+
+export function applyCanvasImageWorkflowToGraph({ nodes, connections, sourceNode, workflow, config, sourcePatch, createNodeId, createConnectionId }: CanvasImageWorkflowInput): CanvasImageWorkflowResult {
+    const taskType = workflow === "image-to-video" || workflow === "first-frame-video" ? CanvasNodeType.Video : CanvasNodeType.Image;
+    const childNode = createCanvasImageWorkflowNode({
+        type: taskType,
+        sourceNode,
+        workflow,
+        config,
+        createNodeId,
+    });
+    const nextSourceNode = patchCanvasNode(sourceNode, {
+        ...sourcePatch,
+        metadata: {
+            ...sourcePatch?.metadata,
+            linkedOutputNodeId: childNode.id,
+        },
+    });
+    const nextNodes = nodes.map((node) => (node.id === sourceNode.id ? nextSourceNode : node)).concat(childNode);
+    const nextConnections = connections.concat({ id: createConnectionId?.() || createCanvasConnectionId(), fromNodeId: sourceNode.id, toNodeId: childNode.id });
+
+    return {
+        nodes: nextNodes,
+        connections: nextConnections,
+        childNode,
+        uiState: {
+            selectedNodeIds: new Set([childNode.id]),
+            selectedConnectionId: null,
+            dialogNodeId: childNode.id,
+        },
+    };
+}
+
+function createCanvasImageWorkflowNode({
+    type,
+    sourceNode,
+    workflow,
+    config,
+    createNodeId,
+}: {
+    type: CanvasNodeType.Image | CanvasNodeType.Video;
+    sourceNode: CanvasNodeData;
+    workflow: CanvasImageWorkflowAction;
+    config: AiConfig;
+    createNodeId?: (type: CanvasNodeType.Image | CanvasNodeType.Video) => string;
+}): CanvasNodeData {
+    const spec = getNodeSpec(type);
+    const metadata = type === CanvasNodeType.Video ? createVideoWorkflowMetadata(config) : createImageWorkflowMetadata(config, isCanvasPanoramaEnabled(sourceNode));
+
+    return {
+        id: createNodeId?.(type) || createCanvasWorkflowNodeId(type),
+        type,
+        title: workflowTitle(workflow, spec.title),
+        position: { x: sourceNode.position.x + sourceNode.width + 96, y: sourceNode.position.y + sourceNode.height / 2 - spec.height / 2 },
+        width: spec.width,
+        height: spec.height,
+        metadata: { ...spec.metadata, ...metadata },
+    };
+}
+
+function createImageWorkflowMetadata(config: AiConfig, panorama: boolean): CanvasNodeMetadata {
+    return {
+        content: "",
+        status: "idle",
+        prompt: "",
+        model: config.imageModel || config.model,
+        size: config.size,
+        quality: config.quality,
+        count: normalizeImageGenerationCount(config.canvasImageCount || config.count, config.imageModel || config.model),
+        panorama: panorama ? true : undefined,
+    };
+}
+
+function createVideoWorkflowMetadata(config: AiConfig): CanvasNodeMetadata {
+    return {
+        content: "",
+        status: "idle",
+        prompt: "",
+        model: config.videoModel || config.model,
+        size: config.size,
+        seconds: config.videoSeconds,
+        vquality: config.vquality,
+        generateAudio: config.videoGenerateAudio,
+        watermark: config.videoWatermark,
+    };
+}
+
+function workflowTitle(workflow: CanvasImageWorkflowAction, fallback: string) {
+    if (workflow === "image-to-image") return "图生图";
+    if (workflow === "image-to-video") return "图生视频";
+    if (workflow === "image-background") return "图片换背景";
+    if (workflow === "first-frame-video") return "首帧图生视频";
+    return fallback;
+}
+
+function createCanvasWorkflowNodeId(type: CanvasNodeType.Image | CanvasNodeType.Video) {
+    return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createCanvasConnectionId() {
+    return Math.random().toString(36).slice(2, 8);
 }
 
 function patchCanvasNode(node: CanvasNodeData, patch: Partial<CanvasNodeData>): CanvasNodeData {

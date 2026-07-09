@@ -1,9 +1,8 @@
 import { nanoid } from "nanoid";
 
-import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 import type { AiConfig } from "@/stores/use-config-store";
-import { getNodeSpec } from "../constants";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "../types";
+import { applyCanvasImageWorkflowToGraph } from "../utils/canvas-graph-mutations";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
 
 type UseImageNodeHandlersOptions = {
     nodesRef: { current: CanvasNodeData[] };
@@ -16,27 +15,15 @@ type UseImageNodeHandlersOptions = {
     effectiveConfig: AiConfig;
 };
 
-const NODE_GAP = 96;
-
 export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, effectiveConfig }: UseImageNodeHandlersOptions) {
     const handleImageToImage = (node: CanvasNodeData) => {
         if (node.type !== CanvasNodeType.Image) return;
         const sourceNode = nodesRef.current.find((item) => item.id === node.id);
         if (!sourceNode || sourceNode.type !== CanvasNodeType.Image) return;
 
-        const imageNode = createWorkflowNode(CanvasNodeType.Image, sourceNode, {
-            content: "",
-            status: "idle",
-            prompt: "",
-            model: effectiveConfig.imageModel || effectiveConfig.model,
-            size: effectiveConfig.size,
-            quality: effectiveConfig.quality,
-            count: normalizeImageGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count, effectiveConfig.imageModel || effectiveConfig.model),
-        });
-
         addWorkflowNode({
             sourceNode,
-            childNode: imageNode,
+            workflow: "image-to-image",
             nodesRef,
             connectionsRef,
             setNodes,
@@ -44,6 +31,7 @@ export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setCo
             setSelectedNodeIds,
             setSelectedConnectionId,
             setDialogNodeId,
+            effectiveConfig,
         });
     };
 
@@ -52,21 +40,9 @@ export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setCo
         const sourceNode = nodesRef.current.find((item) => item.id === node.id);
         if (!sourceNode || sourceNode.type !== CanvasNodeType.Image) return;
 
-        const videoNode = createWorkflowNode(CanvasNodeType.Video, sourceNode, {
-            content: "",
-            status: "idle",
-            prompt: "",
-            model: effectiveConfig.videoModel || effectiveConfig.model,
-            size: effectiveConfig.size,
-            seconds: effectiveConfig.videoSeconds,
-            vquality: effectiveConfig.vquality,
-            generateAudio: effectiveConfig.videoGenerateAudio,
-            watermark: effectiveConfig.videoWatermark,
-        });
-
         addWorkflowNode({
             sourceNode,
-            childNode: videoNode,
+            workflow: "image-to-video",
             nodesRef,
             connectionsRef,
             setNodes,
@@ -74,6 +50,7 @@ export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setCo
             setSelectedNodeIds,
             setSelectedConnectionId,
             setDialogNodeId,
+            effectiveConfig,
         });
     };
 
@@ -83,27 +60,9 @@ export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setCo
     };
 }
 
-function createWorkflowNode(type: CanvasNodeType.Image | CanvasNodeType.Video, sourceNode: CanvasNodeData, metadata: CanvasNodeMetadata): CanvasNodeData {
-    const spec = getNodeSpec(type);
-    const position: Position = {
-        x: sourceNode.position.x + sourceNode.width + NODE_GAP,
-        y: sourceNode.position.y + sourceNode.height / 2 - spec.height / 2,
-    };
-
-    return {
-        id: `${type}-${Date.now()}-${nanoid(6)}`,
-        type,
-        title: spec.title,
-        position,
-        width: spec.width,
-        height: spec.height,
-        metadata: { ...spec.metadata, ...metadata },
-    };
-}
-
 function addWorkflowNode({
     sourceNode,
-    childNode,
+    workflow,
     nodesRef,
     connectionsRef,
     setNodes,
@@ -111,9 +70,10 @@ function addWorkflowNode({
     setSelectedNodeIds,
     setSelectedConnectionId,
     setDialogNodeId,
+    effectiveConfig,
 }: {
     sourceNode: CanvasNodeData;
-    childNode: CanvasNodeData;
+    workflow: "image-to-image" | "image-to-video";
     nodesRef: { current: CanvasNodeData[] };
     connectionsRef: { current: CanvasConnection[] };
     setNodes: (nodes: CanvasNodeData[]) => void;
@@ -121,15 +81,23 @@ function addWorkflowNode({
     setSelectedNodeIds: (nodeIds: Set<string>) => void;
     setSelectedConnectionId: (connectionId: string | null) => void;
     setDialogNodeId: (nodeId: string | null) => void;
+    effectiveConfig: AiConfig;
 }) {
-    const nextNodes: CanvasNodeData[] = nodesRef.current.map((item): CanvasNodeData => (item.id === sourceNode.id ? { ...item, metadata: { ...item.metadata, linkedOutputNodeId: childNode.id } } : item)).concat(childNode);
-    const nextConnections = [...connectionsRef.current, { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: childNode.id }];
+    const result = applyCanvasImageWorkflowToGraph({
+        nodes: nodesRef.current,
+        connections: connectionsRef.current,
+        sourceNode,
+        workflow,
+        config: effectiveConfig,
+        createNodeId: (type) => `${type}-${Date.now()}-${nanoid(6)}`,
+        createConnectionId: nanoid,
+    });
 
-    nodesRef.current = nextNodes;
-    connectionsRef.current = nextConnections;
-    setNodes(nextNodes);
-    setConnections(nextConnections);
-    setSelectedNodeIds(new Set([childNode.id]));
-    setSelectedConnectionId(null);
-    setDialogNodeId(childNode.id);
+    nodesRef.current = result.nodes;
+    connectionsRef.current = result.connections;
+    setNodes(result.nodes);
+    setConnections(result.connections);
+    setSelectedNodeIds(result.uiState.selectedNodeIds);
+    setSelectedConnectionId(result.uiState.selectedConnectionId);
+    setDialogNodeId(result.uiState.dialogNodeId);
 }

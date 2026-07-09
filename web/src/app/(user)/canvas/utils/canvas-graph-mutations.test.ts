@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { applyCanvasBatchPrimaryImage, applyUploadedMediaToCanvasGraph, deleteCanvasNodesFromGraph, type CanvasDeletionUiState } from "./canvas-graph-mutations";
+import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
+
+import { applyCanvasBatchPrimaryImage, applyCanvasImageWorkflowToGraph, applyUploadedMediaToCanvasGraph, deleteCanvasNodesFromGraph, type CanvasDeletionUiState } from "./canvas-graph-mutations";
 import { CanvasNodeType, type CanvasNodeData } from "../types";
 
 function node(id: string, metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
@@ -33,6 +35,24 @@ function deletionUiState(overrides: Partial<CanvasDeletionUiState> = {}): Canvas
         previewNodeId: null,
         runningNodeId: null,
         contextMenu: null,
+        ...overrides,
+    };
+}
+
+function config(overrides: Partial<AiConfig> = {}): AiConfig {
+    return {
+        ...defaultConfig,
+        model: "fallback",
+        imageModel: "image-model",
+        videoModel: "video-model",
+        size: "1:1",
+        quality: "high",
+        count: "4",
+        canvasImageCount: "2",
+        videoSeconds: "6",
+        vquality: "720p",
+        videoGenerateAudio: "true",
+        videoWatermark: "false",
         ...overrides,
     };
 }
@@ -299,5 +319,69 @@ describe("canvas graph mutations", () => {
 
         expect(result).toBe(nodes);
         expect(result[0].metadata).toMatchObject({ content: "root.png", primaryImageId: "root", panorama: true });
+    });
+
+    it("carries panorama intent from a panorama image into image-to-image workflow nodes", () => {
+        const source = node("source", { content: "pano.png", panorama: true });
+        const result = applyCanvasImageWorkflowToGraph({
+            nodes: [source],
+            connections: [],
+            sourceNode: source,
+            workflow: "image-to-image",
+            config: config(),
+            createNodeId: () => "image-workflow",
+            createConnectionId: () => "conn-workflow",
+        });
+
+        expect(result.nodes[0].metadata).toMatchObject({ linkedOutputNodeId: "image-workflow", panorama: true });
+        expect(result.nodes[1]).toMatchObject({
+            id: "image-workflow",
+            type: CanvasNodeType.Image,
+            title: "图生图",
+            metadata: {
+                content: "",
+                status: "idle",
+                model: "image-model",
+                size: "1:1",
+                quality: "high",
+                count: 2,
+                panorama: true,
+            },
+        });
+        expect(result.connections).toEqual([{ id: "conn-workflow", fromNodeId: "source", toNodeId: "image-workflow" }]);
+        expect(result.uiState.selectedNodeIds).toEqual(new Set(["image-workflow"]));
+        expect(result.uiState).toMatchObject({ selectedConnectionId: null, dialogNodeId: "image-workflow" });
+    });
+
+    it("keeps panorama intent out of image-to-video workflow nodes", () => {
+        const source = node("source", { content: "pano.png", panorama: true });
+        const result = applyCanvasImageWorkflowToGraph({
+            nodes: [source],
+            connections: [],
+            sourceNode: source,
+            workflow: "image-to-video",
+            config: config({ size: "16:9", count: "1", canvasImageCount: "1" }),
+            createNodeId: () => "video-workflow",
+            createConnectionId: () => "conn-workflow",
+        });
+
+        expect(result.nodes[1]).toMatchObject({
+            id: "video-workflow",
+            type: CanvasNodeType.Video,
+            title: "图生视频",
+            metadata: {
+                content: "",
+                status: "idle",
+                model: "video-model",
+                size: "16:9",
+                seconds: "6",
+                vquality: "720p",
+                generateAudio: "true",
+                watermark: "false",
+            },
+        });
+        expect(result.nodes[1].metadata).not.toHaveProperty("panorama");
+        expect(result.nodes[1].metadata).not.toHaveProperty("projection");
+        expect(result.nodes[1].metadata).not.toHaveProperty("viewer");
     });
 });

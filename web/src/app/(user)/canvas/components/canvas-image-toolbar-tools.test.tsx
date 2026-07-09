@@ -61,4 +61,12 @@ describe("canvas image toolbar tools", () => {
 
         expect(onTogglePanorama).toHaveBeenCalledWith(node);
     });
+
+    it("keeps normal image tools available for panorama image nodes", () => {
+        const toolIds = buildImageToolbarTools(imageNode({ panorama: true }), handlers()).map((tool) => tool.id);
+
+        expect(toolIds).toEqual(
+            expect.arrayContaining(["copyPrompt", "reversePrompt", "imageToImage", "imageToVideo", "replace", "resize", "maskEdit", "crop", "split", "upscale", "superResolve", "angle", "view"]),
+        );
+    });
 });
