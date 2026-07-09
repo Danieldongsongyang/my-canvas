@@ -311,6 +311,39 @@ describe("canvas generation orchestration", () => {
         ]);
     });
 
+    it("carries panorama intent through text-to-image request, metadata, and asset context", async () => {
+        const requester: CanvasImageGenerationRequester = {
+            generate: vi.fn(async () => [{ dataUrl: imageDataUrl("AAA") }]),
+            edit: vi.fn(),
+        };
+        const addAsset: CanvasAssetCreator = vi.fn(() => "asset-panorama");
+
+        const result = await generateCanvasTextToImage({
+            nodes: [textNode({ metadata: { content: PROMPT, status: "success", panorama: true } })],
+            connections: [],
+            sourceNodeId: "text-1",
+            prompt: PROMPT,
+            effectivePrompt: EFFECTIVE_PROMPT,
+            generationConfig: config("2"),
+            referenceImages: [],
+            createId: ids("root-1", "child-a", "child-b"),
+            createConnectionId: ids("conn-text-root", "conn-root-child-a", "conn-root-child-b"),
+            requester,
+            mediaAdapter: createMediaAdapter(),
+            assetIntake: canvasAssetIntake(addAsset),
+        });
+
+        const requestedPrompt = vi.mocked(requester.generate).mock.calls[0][1];
+        expect(requestedPrompt).toContain(EFFECTIVE_PROMPT);
+        expect(requestedPrompt).toContain("等距矩形 360 全景图");
+        expect(requestedPrompt.match(/等距矩形 360 全景图/g)).toHaveLength(1);
+        expect(requester.generate).toHaveBeenCalledWith(expect.objectContaining({ size: "2:1", count: "1" }), requestedPrompt);
+        expect(addAsset).toHaveBeenCalledWith(expect.objectContaining({ metadata: expect.objectContaining({ prompt: requestedPrompt, size: "2:1" }) }));
+        expect(nodeById(result.nodes, "text-1").metadata).toMatchObject({ panorama: true, status: "success" });
+        expect(nodeById(result.nodes, "root-1").metadata).toMatchObject({ prompt: requestedPrompt, size: "2:1", panorama: true, status: "success" });
+        expect(nodeById(result.nodes, "child-a").metadata).toMatchObject({ prompt: requestedPrompt, size: "2:1", panorama: true, status: "success" });
+    });
+
     it("creates assets only for successful batch children when part of the batch fails", async () => {
         const requester: CanvasImageGenerationRequester = {
             generate: vi
@@ -386,6 +419,66 @@ describe("canvas generation orchestration", () => {
                 prompt: PROMPT,
                 generationType: "generation",
             },
+        });
+    });
+
+    it("retries panorama failures with final panorama prompt and 2:1 config", async () => {
+        const failed = await generateCanvasTextToImage({
+            nodes: [textNode({ metadata: { content: PROMPT, status: "success", panorama: true } })],
+            connections: [],
+            sourceNodeId: "text-1",
+            prompt: PROMPT,
+            effectivePrompt: EFFECTIVE_PROMPT,
+            generationConfig: config(),
+            referenceImages: [],
+            createId: ids("image-1"),
+            createConnectionId: ids("conn-text-image"),
+            requester: {
+                generate: vi.fn(async () => {
+                    throw new Error("失败");
+                }),
+                edit: vi.fn(),
+            },
+            mediaAdapter: createMediaAdapter(),
+        });
+        const failedNode = nodeById(failed.nodes, "image-1");
+        const requester: CanvasImageGenerationRequester = {
+            generate: vi.fn(async () => [{ dataUrl: imageDataUrl("PAN") }]),
+            edit: vi.fn(),
+        };
+        const addAsset: CanvasAssetCreator = vi.fn(() => "asset-panorama-retry");
+
+        expect(failedNode.metadata).toMatchObject({
+            status: "error",
+            prompt: expect.stringContaining("等距矩形 360 全景图"),
+            size: "2:1",
+            panorama: true,
+        });
+
+        const nodes = await retryCanvasGeneratedImage({
+            nodes: failed.nodes,
+            node: failedNode,
+            prompt: failedNode.metadata?.prompt || "",
+            generationConfig: config(),
+            retryImages: [],
+            useReferenceImages: false,
+            savedImageMetadata: failedNode.metadata,
+            requester,
+            mediaAdapter: createMediaAdapter(),
+            assetIntake: canvasAssetIntake(addAsset),
+        });
+
+        const requestedPrompt = vi.mocked(requester.generate).mock.calls[0][1];
+        expect(requestedPrompt).toContain(EFFECTIVE_PROMPT);
+        expect(requestedPrompt).toContain("等距矩形 360 全景图");
+        expect(requester.generate).toHaveBeenCalledWith(expect.objectContaining({ size: "2:1", count: "1" }), requestedPrompt);
+        expect(addAsset).toHaveBeenCalledWith(expect.objectContaining({ metadata: expect.objectContaining({ prompt: requestedPrompt, size: "2:1" }) }));
+        expect(nodeById(nodes, "image-1").metadata).toMatchObject({
+            status: "success",
+            prompt: requestedPrompt,
+            size: "2:1",
+            panorama: true,
+            assetRef: { assetId: "asset-panorama-retry", kind: "image", role: "reference" },
         });
     });
 
