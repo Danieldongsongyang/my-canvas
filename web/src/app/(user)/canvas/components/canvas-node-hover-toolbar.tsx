@@ -38,6 +38,7 @@ type CanvasNodeHoverToolbarProps = {
     onImageToVideo: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
+    onTogglePanorama: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
 };
 
@@ -77,6 +78,7 @@ export function CanvasNodeHoverToolbar({
     onImageToVideo,
     onRetry,
     onToggleFreeResize,
+    onTogglePanorama,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -127,7 +129,7 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, "提示词已复制");
     };
-    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt, onImageToImage, onImageToVideo });
+    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onTogglePanorama, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt, onImageToImage, onImageToVideo });
 
     function openImageToolSettings() {
         if (!node) return;

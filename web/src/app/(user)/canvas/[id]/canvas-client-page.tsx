@@ -44,6 +44,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantSession, type CanvasNodeData, type Position } from "../types";
 import { materializeCanvasImageMedia, type CanvasImageMediaInput } from "../services/canvas-node-media";
+import { toggleCanvasPanoramaMetadata } from "../services/canvas-panorama-policy";
 import type { PendingConnectionCreate } from "./canvas-page-types";
 import {
     NODE_STATUS_SUCCESS,
@@ -625,6 +626,15 @@ function InfiniteCanvasPage() {
                 const ratio = (node.metadata?.naturalWidth || node.width) / (node.metadata?.naturalHeight || node.height || 1);
                 const height = node.width / ratio;
                 return { ...node, height, position: { x: node.position.x, y: node.position.y + node.height / 2 - height / 2 }, metadata: { ...node.metadata, freeResize } };
+            }),
+        );
+    }, []);
+
+    const toggleNodePanorama = useCallback((nodeId: string) => {
+        setNodes((prev) =>
+            prev.map((node) => {
+                if (node.id !== nodeId || node.type !== CanvasNodeType.Image) return node;
+                return { ...node, metadata: toggleCanvasPanoramaMetadata(node) };
             }),
         );
     }, []);
@@ -1233,6 +1243,7 @@ function InfiniteCanvasPage() {
                     onImageToVideo={handleImageToVideo}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
+                    onTogglePanorama={(node) => toggleNodePanorama(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
                 />
 

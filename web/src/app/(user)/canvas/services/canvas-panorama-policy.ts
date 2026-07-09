@@ -43,6 +43,10 @@ export function applyCanvasPanoramaMetadata(metadata: CanvasNodeMetadata | undef
     return { ...(metadata || {}), panorama: enabled };
 }
 
+export function toggleCanvasPanoramaMetadata(node?: Pick<CanvasNodeData, "metadata"> | null): CanvasNodeMetadata {
+    return applyCanvasPanoramaMetadata(node?.metadata, !isCanvasPanoramaEnabled(node));
+}
+
 export function canvasPanoramaReadinessHint(size: { width?: number; height?: number }) {
     if (!size.width || !size.height) return PANORAMA_MISSING_SIZE_HINT;
 

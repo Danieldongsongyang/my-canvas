@@ -10,6 +10,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasImageWorkflowAction, type CanvasNodeData, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { isCanvasPanoramaEnabled } from "../services/canvas-panorama-policy";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
@@ -701,6 +702,7 @@ function ImageContent({
                     className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                 />
             </div>
+            {isCanvasPanoramaEnabled(node) ? <PanoramaBadge theme={theme} /> : null}
             <div className="absolute bottom-3 left-3 z-30 flex gap-1.5 opacity-0 transition-opacity group-hover/node-element:opacity-100">
                 <ImageWorkflowChip icon={<Images className="size-3.5" />} label="以图生图" theme={theme} onClick={() => onImageToImage?.(node)} />
                 <ImageWorkflowChip icon={<Video className="size-3.5" />} label="图生视频" theme={theme} onClick={() => onImageToVideo?.(node)} />
@@ -739,6 +741,16 @@ function ImageContent({
                 </button>
             ) : null}
         </BatchFrame>
+    );
+}
+
+function PanoramaBadge({ theme }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    return (
+        <div className="pointer-events-none absolute left-3 top-3 z-30">
+            <span className="inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-semibold leading-none shadow-[0_6px_18px_rgba(15,23,42,.08)] backdrop-blur-md" style={{ background: `${theme.toolbar.panel}c9`, borderColor: `${theme.toolbar.border}aa`, color: theme.node.text }}>
+                全景
+            </span>
+        </div>
     );
 }
 
