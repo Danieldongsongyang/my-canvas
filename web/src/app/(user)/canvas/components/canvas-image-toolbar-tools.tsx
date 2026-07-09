@@ -1,11 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Brush, Camera, Copy, FileText, Grid2x2, Images, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, Video, ZoomIn } from "lucide-react";
+import { Brush, Camera, Copy, FileText, Grid2x2, Images, Lock, LockOpen, Maximize2, Orbit, Scissors, Sparkles, Upload, Video, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "../types";
+import { isCanvasPanoramaEnabled } from "../services/canvas-panorama-policy";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "imageToImage" | "imageToVideo" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "panorama" | "copyPrompt" | "reversePrompt" | "imageToImage" | "imageToVideo" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -19,6 +20,7 @@ export type ImageToolHandlers = {
     onAngle: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
     onCopyPrompt: (node: CanvasNodeData) => void;
+    onTogglePanorama: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
     onImageToImage: (node: CanvasNodeData) => void;
     onImageToVideo: (node: CanvasNodeData) => void;
@@ -40,11 +42,21 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
-export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v7";
+export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v8";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
+    {
+        id: "panorama",
+        defaultVisible: true,
+        panelLabel: "全景 / 平面",
+        label: (node) => (isCanvasPanoramaEnabled(node) ? "全景" : "平面"),
+        title: (node) => (isCanvasPanoramaEnabled(node) ? "切换为平面图片" : "切换为全景图"),
+        icon: () => <Orbit className="size-4" />,
+        active: (node) => isCanvasPanoramaEnabled(node),
+        run: (node, handlers) => handlers.onTogglePanorama(node),
+    },
     {
         id: "copyPrompt",
         defaultVisible: true,
@@ -165,6 +177,9 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
 ];
 
+const allImageQuickToolIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
+const imageQuickToolIdSet = new Set(allImageQuickToolIds);
+
 export const defaultImageQuickToolIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.filter((tool) => tool.defaultVisible).map((tool) => tool.id)];
 
 export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageToolHandlers) {
@@ -179,9 +194,11 @@ export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageTool
 }
 
 export function normalizeImageQuickToolIds(value: unknown[]) {
-    const allIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
-    const ids = new Set(allIds);
-    return allIds.filter((id) => value.includes(id) && ids.has(id));
+    return allImageQuickToolIds.filter((id) => value.includes(id));
+}
+
+export function isImageQuickToolId(value: string): value is ImageQuickToolId {
+    return imageQuickToolIdSet.has(value as ImageQuickToolId);
 }
 
 export function readImageQuickToolsConfig(value: unknown): ImageQuickToolsConfig {

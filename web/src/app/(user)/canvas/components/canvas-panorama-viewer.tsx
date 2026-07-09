@@ -10,12 +10,26 @@ type CanvasPanoramaViewerProps = {
     readinessHint?: string | null;
 };
 
-const VIEWER_ERROR_MESSAGE = "全景查看器加载失败，请尝试重新打开或检查图片文件。";
+export const VIEWER_ERROR_MESSAGE = "全景查看器加载失败，请尝试重新打开或检查图片文件。";
 
-const ISOLATED_EVENTS = ["wheel", "pointerdown", "pointermove", "pointerup", "mousedown", "mousemove", "mouseup", "dblclick"] as const;
+export const ISOLATED_EVENTS = ["wheel", "pointerdown", "pointermove", "pointerup", "mousedown", "mousemove", "mouseup", "dblclick"] as const;
 
-function stopCanvasEvent(event: Event) {
+export function stopCanvasEvent(event: Event) {
     event.stopPropagation();
+}
+
+export function getMissingPanoramaSrcMessage(src: string) {
+    return src ? null : "缺少全景图片地址，无法打开查看器。";
+}
+
+export function createPanoramaViewerConfig(container: HTMLDivElement, src: string, title?: string) {
+    return {
+        container,
+        panorama: src,
+        caption: title,
+        loadingTxt: "正在加载全景图...",
+        navbar: ["zoom", "move", "fullscreen"],
+    };
 }
 
 export function CanvasPanoramaViewer({ src, title, readinessHint }: CanvasPanoramaViewerProps) {
@@ -38,19 +52,14 @@ export function CanvasPanoramaViewer({ src, title, readinessHint }: CanvasPanora
 
         setError(null);
 
-        if (!src) {
-            setError("缺少全景图片地址，无法打开查看器。");
+        const missingSrcMessage = getMissingPanoramaSrcMessage(src);
+        if (missingSrcMessage) {
+            setError(missingSrcMessage);
             return;
         }
 
         try {
-            const viewer = new Viewer({
-                container: root,
-                panorama: src,
-                caption: title,
-                loadingTxt: "正在加载全景图...",
-                navbar: ["zoom", "move", "fullscreen"],
-            });
+            const viewer = new Viewer(createPanoramaViewerConfig(root, src, title));
             const handlePanoramaError = () => setError(VIEWER_ERROR_MESSAGE);
             viewer.addEventListener("panorama-error", handlePanoramaError);
 

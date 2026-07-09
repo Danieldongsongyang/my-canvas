@@ -4,12 +4,13 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Image as ImageIcon, Images, Music2, Pencil, RefreshCw, Star, Upload, Video } from "lucide-react";
 
-import { canvasThemes } from "@/lib/canvas-theme";
+import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasImageWorkflowAction, type CanvasNodeData, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { isCanvasPanoramaEnabled } from "../services/canvas-panorama-policy";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
@@ -59,7 +60,7 @@ type CanvasNodeProps = {
 
 type NodeContentRendererProps = {
     node: CanvasNodeData;
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    theme: CanvasTheme;
     isEditingContent: boolean;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     isSelected: boolean;
@@ -497,7 +498,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
     );
 }
 
-function TextNodeActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick?: () => void }) {
+function TextNodeActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: CanvasTheme; onClick?: () => void }) {
     return (
         <button
             type="button"
@@ -609,7 +610,7 @@ function EmptyImageContent({ node, theme, isSelected, isBatchRoot, batchCount, b
     return content;
 }
 
-function ImageWorkflowActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick?: () => void }) {
+function ImageWorkflowActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: CanvasTheme; onClick?: () => void }) {
     return (
         <button
             type="button"
@@ -701,6 +702,7 @@ function ImageContent({
                     className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                 />
             </div>
+            {isCanvasPanoramaEnabled(node) ? <PanoramaBadge theme={theme} /> : null}
             <div className="absolute bottom-3 left-3 z-30 flex gap-1.5 opacity-0 transition-opacity group-hover/node-element:opacity-100">
                 <ImageWorkflowChip icon={<Images className="size-3.5" />} label="以图生图" theme={theme} onClick={() => onImageToImage?.(node)} />
                 <ImageWorkflowChip icon={<Video className="size-3.5" />} label="图生视频" theme={theme} onClick={() => onImageToVideo?.(node)} />
@@ -742,7 +744,20 @@ function ImageContent({
     );
 }
 
-function ImageWorkflowChip({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick?: () => void }) {
+function PanoramaBadge({ theme }: { theme: CanvasTheme }) {
+    return (
+        <div className="pointer-events-none absolute left-3 top-3 z-30">
+            <span
+                className="inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-semibold leading-none shadow-[0_6px_18px_rgba(15,23,42,.08)] backdrop-blur-md"
+                style={{ background: `${theme.toolbar.panel}c9`, borderColor: `${theme.toolbar.border}aa`, color: theme.node.text }}
+            >
+                全景
+            </span>
+        </div>
+    );
+}
+
+function ImageWorkflowChip({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: CanvasTheme; onClick?: () => void }) {
     return (
         <button
             type="button"

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultConfig } from "@/stores/use-config-store";
 
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
-import { applyCanvasPanoramaGenerationConfig, applyCanvasPanoramaMetadata, buildCanvasPanoramaGenerationRequest, buildCanvasPanoramaPrompt, canvasPanoramaReadinessHint, isCanvasPanoramaEnabled } from "./canvas-panorama-policy";
+import { applyCanvasPanoramaGenerationConfig, applyCanvasPanoramaMetadata, buildCanvasPanoramaGenerationRequest, buildCanvasPanoramaPrompt, canvasPanoramaReadinessHint, isCanvasPanoramaEnabled, toggleCanvasPanoramaMetadata } from "./canvas-panorama-policy";
 
 function node(metadata?: CanvasNodeMetadata): CanvasNodeData {
     return {
@@ -68,6 +68,11 @@ describe("canvas panorama policy", () => {
     it("writes explicit true and false panorama metadata", () => {
         expect(applyCanvasPanoramaMetadata({ prompt: "a" }, true)).toEqual({ prompt: "a", panorama: true });
         expect(applyCanvasPanoramaMetadata({ prompt: "a" }, false)).toEqual({ prompt: "a", panorama: false });
+    });
+
+    it("toggles panorama metadata with an explicit false when disabling", () => {
+        expect(toggleCanvasPanoramaMetadata(node({ prompt: "a" }))).toEqual({ prompt: "a", panorama: true });
+        expect(toggleCanvasPanoramaMetadata(node({ prompt: "a", panorama: true }))).toEqual({ prompt: "a", panorama: false });
     });
 
     it("returns only non-blocking readiness hints for unsuitable panorama dimensions", () => {
