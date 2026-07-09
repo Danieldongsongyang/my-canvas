@@ -4,7 +4,7 @@ import { requestEdit, requestGeneration } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
-import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
+import { isDreaminaImageModel, normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 
 import { NODE_DEFAULT_SIZE } from "../../constants";
 import { applyCanvasPanoramaMetadata, buildCanvasPanoramaGenerationRequest, isCanvasPanoramaEnabled } from "../../services/canvas-panorama-policy";
@@ -171,51 +171,69 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
 
     let hasSuccess = false;
     let hasFailure = false;
-    await Promise.all(
-        targetIds.map(async (targetId) => {
-            try {
-                const image = referenceImages.length
-                    ? await requestEdit({ ...finalGenerationConfig, count: "1" }, generationPrompt, referenceImages).then((items) => items[0])
-                    : await requestGeneration({ ...finalGenerationConfig, count: "1" }, generationPrompt).then((items) => items[0]);
-                const uploaded = await uploadImage(image.dataUrl);
-                const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                const assetMetadataPatch = registerCanvasGeneratedImageAsset({
-                    addAsset: deps.addAsset,
-                    media: uploaded,
-                    context: {
-                        canvasId: deps.canvasId,
-                        nodeId: targetId,
-                        rootNodeId: rootId,
-                        sourceNodeId: nodeId,
-                        prompt: generationPrompt,
-                        model: finalGenerationConfig.model || finalGenerationConfig.imageModel,
-                        size: finalGenerationConfig.size,
-                        quality: finalGenerationConfig.quality,
-                        batchId: count > 1 ? rootId : undefined,
-                        createdAt: new Date().toISOString(),
-                    },
-                }).metadataPatch;
-                setNodes((prev) =>
-                    applyCanvasImageGenerationSuccess({
-                        nodes: prev,
-                        rootNodeId: rootId,
-                        targetNodeId: targetId,
-                        width: imageSize.width,
-                        height: imageSize.height,
-                        metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploaded), ...assetMetadataPatch }, panorama),
-                    }),
-                );
-                hasSuccess = true;
-                if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
-                return true;
-            } catch (error) {
-                const errorDetails = error instanceof Error ? error.message : "生成失败";
-                hasFailure = true;
-                setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
-                return false;
-            }
-        }),
-    );
+    let generatedImages: Awaited<ReturnType<typeof requestGeneration>> = [];
+    let shouldFillGeneratedImages = true;
+    const useProviderBatch = count > 1 && isDreaminaImageModel(finalGenerationConfig.model || finalGenerationConfig.imageModel);
+    if (useProviderBatch) {
+        try {
+            generatedImages = referenceImages.length ? await requestEdit(finalGenerationConfig, generationPrompt, referenceImages) : await requestGeneration(finalGenerationConfig, generationPrompt);
+        } catch (error) {
+            const errorDetails = error instanceof Error ? error.message : "生成失败";
+            hasFailure = true;
+            shouldFillGeneratedImages = false;
+            setNodes((prev) => prev.map((node) => (targetIds.includes(node.id) ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
+        }
+    }
+    if (shouldFillGeneratedImages) {
+        await Promise.all(
+            targetIds.map(async (targetId, index) => {
+                try {
+                    const image = useProviderBatch
+                        ? generatedImages[index]
+                        : referenceImages.length
+                          ? await requestEdit({ ...finalGenerationConfig, count: "1" }, generationPrompt, referenceImages).then((items) => items[0])
+                          : await requestGeneration({ ...finalGenerationConfig, count: "1" }, generationPrompt).then((items) => items[0]);
+                    if (!image) throw new Error(useProviderBatch ? "批量生成返回图片数量不足" : "生成失败");
+                    const uploaded = await uploadImage(image.dataUrl);
+                    const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                    const assetMetadataPatch = registerCanvasGeneratedImageAsset({
+                        addAsset: deps.addAsset,
+                        media: uploaded,
+                        context: {
+                            canvasId: deps.canvasId,
+                            nodeId: targetId,
+                            rootNodeId: rootId,
+                            sourceNodeId: nodeId,
+                            prompt: generationPrompt,
+                            model: finalGenerationConfig.model || finalGenerationConfig.imageModel,
+                            size: finalGenerationConfig.size,
+                            quality: finalGenerationConfig.quality,
+                            batchId: count > 1 ? rootId : undefined,
+                            createdAt: new Date().toISOString(),
+                        },
+                    }).metadataPatch;
+                    setNodes((prev) =>
+                        applyCanvasImageGenerationSuccess({
+                            nodes: prev,
+                            rootNodeId: rootId,
+                            targetNodeId: targetId,
+                            width: imageSize.width,
+                            height: imageSize.height,
+                            metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploaded), ...assetMetadataPatch }, panorama),
+                        }),
+                    );
+                    hasSuccess = true;
+                    if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
+                    return true;
+                } catch (error) {
+                    const errorDetails = error instanceof Error ? error.message : "生成失败";
+                    hasFailure = true;
+                    setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
+                    return false;
+                }
+            }),
+        );
+    }
     if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
     setNodes((prev) =>
         prev.map((node) => {

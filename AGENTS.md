@@ -3,12 +3,13 @@
 ## 基本原则
 
 - 实现保持简单直接，不为假想场景引入额外抽象。
-- - 日期、URL、文件解析、压缩、加密等通用能力，优先级为：浏览器原生 API > 项目已有依赖 > 成熟轻量库 > 自己写；不要手写复杂标准实现。
+- 日期、URL、文件解析、压缩、加密等通用能力，优先级为：浏览器原生 API > 项目已有依赖 > 成熟轻量库 > 自己写；不要手写复杂标准实现。
 - 不要改无关文件，不要顺手重构。
 - 如果工作区已有用户改动，不要回滚，不要覆盖；只在必要范围内追加修改。
 
 ## 前端规范
 
+- `web/` 前端项目统一使用 Bun；新增或更新依赖用 `cd web && bun add ...`，运行脚本用 `bun run ...`，不要引入 npm、pnpm 或 yarn lockfile。
 - 前端使用 Next.js App Router、React、TypeScript、Ant Design、Tailwind、Zustand。
 - 普通页面编写 Ant Design 相关代码时，参考 https://ant.design/llms-full.txt 理解组件 API、示例和设计规范，并优先结合项目当前 antd 版本与既有写法。
 - Studio 工作区 `/studio/:seriesId` 是视觉特例：UI 详细规范见 `docs/studio-lumenx-visual-standards.md`；修改 Studio 工作区 UI 前必须阅读并遵守。Studio 可以使用 Ant Design 组件能力，但视觉以 LumenX dark glass 工作台为最高优先级，不套用普通 Ant Design/SaaS 页面风格。
@@ -24,10 +25,9 @@
 - 页面私有 hook 放在对应页面目录下，例如 `admin/assets/use-admin-assets.ts`；只有多个页面真实复用的 hook 才放到外层 `hooks/`。
 - 页面私有组件放在对应页面目录的 `components/` 下；只在多个页面真实复用时再上提共享。
 - 普通页面的全局主题、背景、卡片阴影、表格配色等统一在 `web/src/lib/app-theme.ts`、`AppProviders` 或必要的全局 CSS 中配置；页面私有组件不要自己写 `dark ? ...` 主题分支。Studio 工作区允许在局部 `ConfigProvider`、同目录常量或组件 className 中使用 LumenX atelier token，但不要散落新的自创颜色体系。
-- 组件优先使用函数组件和现有 hooks，不新增大型状态管理方案。
+- 不新增大型状态管理方案；组件优先复用现有 hooks 和 store。
 - UI 图标优先使用 `lucide-react` 或项目已经使用的 Ant Design 图标。
 - 页面文案保持中文。
-- 不要在组件里堆太多无关逻辑；复杂逻辑优先抽成同目录工具函数或小组件。
 - 样式优先由组件自己管理；组件私有样式优先使用 Tailwind className 或少量内联 style，不要为单个组件新增大量全局 CSS。
 - 全局 CSS 只放基础变量、全局重置、跨页面通用样式和少量第三方组件必要覆盖；不要在 `globals.css` 堆页面私有样式。
 - 代码尽量短小直接，少拆不必要组件，少做多层 props 传递，避免为了抽象堆出更多代码。
@@ -42,6 +42,8 @@
 - 顶部工具栏保持极简扁平、低视觉重量，避免边框、阴影、胶囊化按钮
 - 图片节点尺寸逻辑要尊重原始比例，除非功能明确要求自由变形。
 - 批量生成、多图展示、助手面板等画布交互要尽量简洁，不要占用过多画布空间。
+- Canvas 图结构规则，例如批量主图、上传/替换媒体、生成结果回填、图片工作流节点创建，优先放进 `Canvas Graph Mutations` 等纯图规则 seam；页面组件只负责调用和展示。
+- 修改 Canvas 全景图、图片生成、批量图规则或图片工作流边界时，优先补充 `Canvas Panorama Policy`、`Canvas Generation Orchestration`、`Canvas Graph Mutations` 等 seam 的外部行为测试；不要测试第三方 viewer 内部实现。
 
 ## 后端
 - 后端在 /Users/a1/Desktop/mange-backend
