@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 
 import type { AiConfig } from "@/stores/use-config-store";
 import { applyCanvasImageWorkflowToGraph } from "../utils/canvas-graph-mutations";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasImageWorkflowAction, type CanvasNodeData } from "../types";
 
 type UseImageNodeHandlersOptions = {
     nodesRef: { current: CanvasNodeData[] };
@@ -15,15 +15,17 @@ type UseImageNodeHandlersOptions = {
     effectiveConfig: AiConfig;
 };
 
+type ImageNodeWorkflowAction = Extract<CanvasImageWorkflowAction, "image-to-image" | "image-to-video">;
+
 export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, effectiveConfig }: UseImageNodeHandlersOptions) {
-    const handleImageToImage = (node: CanvasNodeData) => {
+    const startImageWorkflow = (node: CanvasNodeData, workflow: ImageNodeWorkflowAction) => {
         if (node.type !== CanvasNodeType.Image) return;
         const sourceNode = nodesRef.current.find((item) => item.id === node.id);
         if (!sourceNode || sourceNode.type !== CanvasNodeType.Image) return;
 
         addWorkflowNode({
             sourceNode,
-            workflow: "image-to-image",
+            workflow,
             nodesRef,
             connectionsRef,
             setNodes,
@@ -35,24 +37,8 @@ export function useImageNodeHandlers({ nodesRef, connectionsRef, setNodes, setCo
         });
     };
 
-    const handleImageToVideo = (node: CanvasNodeData) => {
-        if (node.type !== CanvasNodeType.Image) return;
-        const sourceNode = nodesRef.current.find((item) => item.id === node.id);
-        if (!sourceNode || sourceNode.type !== CanvasNodeType.Image) return;
-
-        addWorkflowNode({
-            sourceNode,
-            workflow: "image-to-video",
-            nodesRef,
-            connectionsRef,
-            setNodes,
-            setConnections,
-            setSelectedNodeIds,
-            setSelectedConnectionId,
-            setDialogNodeId,
-            effectiveConfig,
-        });
-    };
+    const handleImageToImage = (node: CanvasNodeData) => startImageWorkflow(node, "image-to-image");
+    const handleImageToVideo = (node: CanvasNodeData) => startImageWorkflow(node, "image-to-video");
 
     return {
         handleImageToImage,
@@ -73,7 +59,7 @@ function addWorkflowNode({
     effectiveConfig,
 }: {
     sourceNode: CanvasNodeData;
-    workflow: "image-to-image" | "image-to-video";
+    workflow: ImageNodeWorkflowAction;
     nodesRef: { current: CanvasNodeData[] };
     connectionsRef: { current: CanvasConnection[] };
     setNodes: (nodes: CanvasNodeData[]) => void;

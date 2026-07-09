@@ -5,6 +5,16 @@ import { getNodeSpec } from "../constants";
 import { isCanvasPanoramaEnabled } from "../services/canvas-panorama-policy";
 import { CanvasNodeType, type CanvasConnection, type CanvasImageWorkflowAction, type CanvasNodeData, type CanvasNodeMetadata, type ContextMenuState, type Position } from "../types";
 
+type CanvasWorkflowNodeType = CanvasNodeType.Image | CanvasNodeType.Video;
+
+const WORKFLOW_NODE_GAP = 96;
+const WORKFLOW_TITLE_BY_ACTION = {
+    "image-to-image": "图生图",
+    "image-to-video": "图生视频",
+    "image-background": "图片换背景",
+    "first-frame-video": "首帧图生视频",
+} satisfies Record<CanvasImageWorkflowAction, string>;
+
 export type CanvasUploadUiState = {
     selectedNodeIds: Set<string>;
     selectedConnectionId: string | null;
@@ -87,7 +97,7 @@ export type CanvasImageWorkflowInput = {
     workflow: CanvasImageWorkflowAction;
     config: AiConfig;
     sourcePatch?: Partial<CanvasNodeData>;
-    createNodeId?: (type: CanvasNodeType.Image | CanvasNodeType.Video) => string;
+    createNodeId?: (type: CanvasWorkflowNodeType) => string;
     createConnectionId?: () => string;
 };
 
@@ -177,9 +187,9 @@ export function applyCanvasBatchPrimaryImage({ nodes, child }: CanvasBatchPrimar
 }
 
 export function applyCanvasImageWorkflowToGraph({ nodes, connections, sourceNode, workflow, config, sourcePatch, createNodeId, createConnectionId }: CanvasImageWorkflowInput): CanvasImageWorkflowResult {
-    const taskType = workflow === "image-to-video" || workflow === "first-frame-video" ? CanvasNodeType.Video : CanvasNodeType.Image;
+    const childType = getCanvasImageWorkflowNodeType(workflow);
     const childNode = createCanvasImageWorkflowNode({
-        type: taskType,
+        type: childType,
         sourceNode,
         workflow,
         config,
@@ -214,24 +224,37 @@ function createCanvasImageWorkflowNode({
     config,
     createNodeId,
 }: {
-    type: CanvasNodeType.Image | CanvasNodeType.Video;
+    type: CanvasWorkflowNodeType;
     sourceNode: CanvasNodeData;
     workflow: CanvasImageWorkflowAction;
     config: AiConfig;
-    createNodeId?: (type: CanvasNodeType.Image | CanvasNodeType.Video) => string;
+    createNodeId?: (type: CanvasWorkflowNodeType) => string;
 }): CanvasNodeData {
     const spec = getNodeSpec(type);
-    const metadata = type === CanvasNodeType.Video ? createVideoWorkflowMetadata(config) : createImageWorkflowMetadata(config, isCanvasPanoramaEnabled(sourceNode));
+    const metadata = createWorkflowMetadata(type, sourceNode, config);
 
     return {
         id: createNodeId?.(type) || createCanvasWorkflowNodeId(type),
         type,
-        title: workflowTitle(workflow, spec.title),
-        position: { x: sourceNode.position.x + sourceNode.width + 96, y: sourceNode.position.y + sourceNode.height / 2 - spec.height / 2 },
+        title: getCanvasImageWorkflowTitle(workflow, spec.title),
+        position: {
+            x: sourceNode.position.x + sourceNode.width + WORKFLOW_NODE_GAP,
+            y: sourceNode.position.y + sourceNode.height / 2 - spec.height / 2,
+        },
         width: spec.width,
         height: spec.height,
         metadata: { ...spec.metadata, ...metadata },
     };
+}
+
+function getCanvasImageWorkflowNodeType(workflow: CanvasImageWorkflowAction): CanvasWorkflowNodeType {
+    if (workflow === "image-to-video" || workflow === "first-frame-video") return CanvasNodeType.Video;
+    return CanvasNodeType.Image;
+}
+
+function createWorkflowMetadata(type: CanvasWorkflowNodeType, sourceNode: CanvasNodeData, config: AiConfig): CanvasNodeMetadata {
+    if (type === CanvasNodeType.Video) return createVideoWorkflowMetadata(config);
+    return createImageWorkflowMetadata(config, isCanvasPanoramaEnabled(sourceNode));
 }
 
 function createImageWorkflowMetadata(config: AiConfig, panorama: boolean): CanvasNodeMetadata {
@@ -261,15 +284,11 @@ function createVideoWorkflowMetadata(config: AiConfig): CanvasNodeMetadata {
     };
 }
 
-function workflowTitle(workflow: CanvasImageWorkflowAction, fallback: string) {
-    if (workflow === "image-to-image") return "图生图";
-    if (workflow === "image-to-video") return "图生视频";
-    if (workflow === "image-background") return "图片换背景";
-    if (workflow === "first-frame-video") return "首帧图生视频";
-    return fallback;
+function getCanvasImageWorkflowTitle(workflow: CanvasImageWorkflowAction, fallback: string) {
+    return WORKFLOW_TITLE_BY_ACTION[workflow] ?? fallback;
 }
 
-function createCanvasWorkflowNodeId(type: CanvasNodeType.Image | CanvasNodeType.Video) {
+function createCanvasWorkflowNodeId(type: CanvasWorkflowNodeType) {
     return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
