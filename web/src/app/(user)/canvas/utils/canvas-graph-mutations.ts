@@ -70,6 +70,11 @@ export type CanvasImageGenerationSuccessInput = {
     metadata: CanvasNodeMetadata;
 };
 
+export type CanvasBatchPrimaryImageInput = {
+    nodes: CanvasNodeData[];
+    child: CanvasNodeData;
+};
+
 export function applyCanvasImageGenerationStart({ nodes, connections, sourceNodeId, sourcePatch, generatedNodes, generatedConnections, dialogNodeId }: CanvasImageGenerationStartInput): CanvasImageGenerationStartResult {
     return {
         nodes: [...nodes.map((node) => (node.id === sourceNodeId ? patchCanvasNode(node, sourcePatch) : node)), ...generatedNodes],
@@ -120,6 +125,29 @@ export function completeCanvasImageGeneration(nodes: CanvasNodeData[], rootNodeI
     return nodes.map((node) => {
         if (node.id !== rootNodeId) return node;
         return { ...node, metadata: { ...node.metadata, status: "error", errorDetails: "全部图片生成失败" } };
+    });
+}
+
+export function applyCanvasBatchPrimaryImage({ nodes, child }: CanvasBatchPrimaryImageInput): CanvasNodeData[] {
+    const rootId = child.metadata?.batchRootId;
+    if (!rootId || !child.metadata?.content) return nodes;
+
+    return nodes.map((node) => {
+        if (node.id !== rootId) return node;
+        return {
+            ...node,
+            width: child.width,
+            height: child.height,
+            metadata: {
+                ...node.metadata,
+                content: child.metadata?.content,
+                primaryImageId: child.id,
+                naturalWidth: child.metadata?.naturalWidth,
+                naturalHeight: child.metadata?.naturalHeight,
+                freeResize: child.metadata?.freeResize,
+                panorama: child.metadata?.panorama,
+            },
+        };
     });
 }
 

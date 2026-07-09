@@ -42,6 +42,7 @@ import { useImageNodeHandlers } from "../hooks/use-image-node-handlers";
 import { useTextNodeHandlers } from "../hooks/use-text-node-handlers";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
+import { applyCanvasBatchPrimaryImage } from "../utils/canvas-graph-mutations";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantSession, type CanvasNodeData, type Position } from "../types";
 import { materializeCanvasImageMedia, type CanvasImageMediaInput } from "../services/canvas-node-media";
 import type { PendingConnectionCreate } from "./canvas-page-types";
@@ -663,27 +664,7 @@ function InfiniteCanvasPage() {
     }, []);
 
     const setBatchPrimary = useCallback((child: CanvasNodeData) => {
-        const rootId = child.metadata?.batchRootId;
-        if (!rootId || !child.metadata?.content) return;
-        setNodes((prev) =>
-            prev.map((node) =>
-                node.id === rootId
-                    ? {
-                          ...node,
-                          width: child.width,
-                          height: child.height,
-                          metadata: {
-                              ...node.metadata,
-                              content: child.metadata?.content,
-                              primaryImageId: child.id,
-                              naturalWidth: child.metadata?.naturalWidth,
-                              naturalHeight: child.metadata?.naturalHeight,
-                              freeResize: child.metadata?.freeResize,
-                          },
-                      }
-                    : node,
-            ),
-        );
+        setNodes((prev) => applyCanvasBatchPrimaryImage({ nodes: prev, child }));
     }, []);
 
     const requestTextEdit = useCallback((nodeId: string) => {

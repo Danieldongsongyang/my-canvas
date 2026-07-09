@@ -7,12 +7,14 @@ import type { ReferenceImage } from "@/types/image";
 import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 
 import { NODE_DEFAULT_SIZE } from "../../constants";
+import { buildCanvasPanoramaGenerationRequest, applyCanvasPanoramaMetadata, isCanvasPanoramaEnabled } from "../../services/canvas-panorama-policy";
 import { fitNodeSize } from "../../utils/canvas-node-size";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "../../types";
 import { NODE_STATUS_ERROR, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS, buildImageGenerationMetadata, imageMetadata } from "../canvas-page-utils";
 import type { CanvasGenerateBranchParams, CanvasGenerationMessage, CanvasGenerationSetters } from "./canvas-generation-types";
 import { generateCanvasTextToImage, retryCanvasGeneratedImage } from "../../services/canvas-generation-orchestration";
 import { registerCanvasGeneratedImageAsset, type CanvasAssetCreator } from "../../services/canvas-asset-intake";
+import { applyCanvasImageGenerationSuccess } from "../../utils/canvas-graph-mutations";
 
 type ImageGenerationDeps = Pick<CanvasGenerationSetters, "setNodes" | "setConnections" | "setSelectedNodeIds" | "setSelectedConnectionId" | "setDialogNodeId"> & {
     message: CanvasGenerationMessage;
@@ -25,7 +27,6 @@ type ImageGenerationDeps = Pick<CanvasGenerationSetters, "setNodes" | "setConnec
 export async function generateCanvasImage(params: CanvasGenerateBranchParams, deps: ImageGenerationDeps) {
     const { nodeId, prompt, effectivePrompt, sourceNode, generationConfig, generationContext, setPendingChildIds } = params;
     const { setNodes, setConnections, setSelectedNodeIds, setSelectedConnectionId, setDialogNodeId, message } = deps;
-    const count = normalizeImageGenerationCount(generationConfig.count, generationConfig.model || generationConfig.imageModel);
     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
     const isImageNode = sourceNode?.type === CanvasNodeType.Image;
     const isEmptyImageNode = isImageNode && !sourceNode?.metadata?.content;
@@ -34,8 +35,15 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
             ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
             : [];
     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
+    const generationRequest = buildCanvasPanoramaGenerationRequest({
+        prompt: effectivePrompt,
+        generationConfig,
+        enabled: isCanvasPanoramaEnabled(sourceNode),
+    });
+    const { prompt: generationPrompt, generationConfig: finalGenerationConfig, panorama } = generationRequest;
+    const count = normalizeImageGenerationCount(finalGenerationConfig.count, finalGenerationConfig.model || finalGenerationConfig.imageModel);
     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
-    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
+    const generationMetadata = buildImageGenerationMetadata(generationType, finalGenerationConfig, count, referenceImages);
 
     if (!isConfigNode && !isImageNode) {
         const result = await generateCanvasTextToImage({
@@ -80,22 +88,25 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
     const rootNode: CanvasNodeData = {
         id: rootId,
         type: CanvasNodeType.Image,
-        title: effectivePrompt.slice(0, 32) || "Generated Image",
+        title: generationPrompt.slice(0, 32) || "Generated Image",
         position: {
             x: isEmptyImageNode ? parentPosition.x : parentPosition.x + parentConfig.width + gap,
             y: parentPosition.y + parentConfig.height / 2 - imageConfig.height / 2,
         },
         width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
         height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
-        metadata: {
-            prompt: effectivePrompt,
-            status: NODE_STATUS_LOADING,
-            isBatchRoot: count > 1,
-            batchChildIds: count > 1 ? childIds : undefined,
-            batchUsesReferenceImages: referenceImages.length > 0,
-            ...generationMetadata,
-            imageBatchExpanded: count > 1 ? true : undefined,
-        },
+        metadata: applyCanvasPanoramaMetadata(
+            {
+                prompt: generationPrompt,
+                status: NODE_STATUS_LOADING,
+                isBatchRoot: count > 1,
+                batchChildIds: count > 1 ? childIds : undefined,
+                batchUsesReferenceImages: referenceImages.length > 0,
+                ...generationMetadata,
+                imageBatchExpanded: count > 1 ? true : undefined,
+            },
+            panorama,
+        ),
     };
     const childNodes: CanvasNodeData[] = childIds.map((id, index) => ({
         id,
@@ -107,7 +118,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
         },
         width: imageConfig.width,
         height: imageConfig.height,
-        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
+        metadata: applyCanvasPanoramaMetadata({ prompt: generationPrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata }, panorama),
     }));
     const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
 
@@ -118,7 +129,7 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
             if (isConfigNode) {
                 return {
                     ...node,
-                    metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
+                    metadata: { ...node.metadata, prompt: generationPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
                 };
             }
 
@@ -163,8 +174,8 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
         targetIds.map(async (targetId) => {
             try {
                 const image = referenceImages.length
-                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages).then((items) => items[0])
-                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt).then((items) => items[0]);
+                    ? await requestEdit({ ...finalGenerationConfig, count: "1" }, generationPrompt, referenceImages).then((items) => items[0])
+                    : await requestGeneration({ ...finalGenerationConfig, count: "1" }, generationPrompt).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                 const assetMetadataPatch = registerCanvasGeneratedImageAsset({
@@ -175,38 +186,24 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
                         nodeId: targetId,
                         rootNodeId: rootId,
                         sourceNodeId: nodeId,
-                        prompt: effectivePrompt,
-                        model: generationConfig.model || generationConfig.imageModel,
-                        size: generationConfig.size,
-                        quality: generationConfig.quality,
+                        prompt: generationPrompt,
+                        model: finalGenerationConfig.model || finalGenerationConfig.imageModel,
+                        size: finalGenerationConfig.size,
+                        quality: finalGenerationConfig.quality,
                         batchId: count > 1 ? rootId : undefined,
                         createdAt: new Date().toISOString(),
                     },
                 }).metadataPatch;
-                setNodes((prev) => {
-                    const root = prev.find((node) => node.id === rootId);
-                    return prev.map((node) => {
-                        if (node.id !== targetId && node.id !== rootId) return node;
-                        const center = { x: node.position.x + node.width / 2, y: node.position.y + node.height / 2 };
-                        if (node.id === rootId && (targetId === rootId || !root?.metadata?.primaryImageId))
-                            return {
-                                ...node,
-                                position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
-                                width: imageSize.width,
-                                height: imageSize.height,
-                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadataPatch, primaryImageId: targetId },
-                            };
-                        if (node.id === targetId)
-                            return {
-                                ...node,
-                                position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
-                                width: imageSize.width,
-                                height: imageSize.height,
-                                metadata: { ...node.metadata, ...imageMetadata(uploaded), ...assetMetadataPatch },
-                            };
-                        return node;
-                    });
-                });
+                setNodes((prev) =>
+                    applyCanvasImageGenerationSuccess({
+                        nodes: prev,
+                        rootNodeId: rootId,
+                        targetNodeId: targetId,
+                        width: imageSize.width,
+                        height: imageSize.height,
+                        metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploaded), ...assetMetadataPatch }, panorama),
+                    }),
+                );
                 hasSuccess = true;
                 if (isConfigNode) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)));
                 return true;
