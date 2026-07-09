@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasNodeType, type CanvasNodeData } from "../types";
-import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, readImageQuickToolsConfig } from "./canvas-image-toolbar-tools";
+import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, isImageQuickToolId, readImageQuickToolsConfig, type ImageToolHandlers } from "./canvas-image-toolbar-tools";
 
 function imageNode(metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     return {
@@ -15,7 +15,7 @@ function imageNode(metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     };
 }
 
-function handlers(overrides: Partial<Parameters<typeof buildImageToolbarTools>[1]> = {}): Parameters<typeof buildImageToolbarTools>[1] {
+function handlers(overrides: Partial<ImageToolHandlers> = {}): ImageToolHandlers {
     return {
         onUpload: vi.fn(),
         onToggleFreeResize: vi.fn(),
@@ -39,6 +39,8 @@ describe("canvas image toolbar tools", () => {
     it("upgrades the quick tools storage key and includes panorama by default", () => {
         expect(IMAGE_QUICK_TOOLS_STORAGE_KEY).toBe("canvas-image-quick-tools-v8");
         expect(defaultImageQuickToolIds).toContain("panorama");
+        expect(isImageQuickToolId("panorama")).toBe(true);
+        expect(isImageQuickToolId("retry")).toBe(false);
         expect(readImageQuickToolsConfig({ ids: defaultImageQuickToolIds, showLabels: true }).ids).toContain("panorama");
     });
 

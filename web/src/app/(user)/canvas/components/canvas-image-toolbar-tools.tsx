@@ -177,6 +177,9 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
 ];
 
+const allImageQuickToolIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
+const imageQuickToolIdSet = new Set(allImageQuickToolIds);
+
 export const defaultImageQuickToolIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.filter((tool) => tool.defaultVisible).map((tool) => tool.id)];
 
 export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageToolHandlers) {
@@ -191,9 +194,11 @@ export function buildImageToolbarTools(node: CanvasNodeData, handlers: ImageTool
 }
 
 export function normalizeImageQuickToolIds(value: unknown[]) {
-    const allIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
-    const ids = new Set(allIds);
-    return allIds.filter((id) => value.includes(id) && ids.has(id));
+    return allImageQuickToolIds.filter((id) => value.includes(id));
+}
+
+export function isImageQuickToolId(value: string): value is ImageQuickToolId {
+    return imageQuickToolIdSet.has(value as ImageQuickToolId);
 }
 
 export function readImageQuickToolsConfig(value: unknown): ImageQuickToolsConfig {

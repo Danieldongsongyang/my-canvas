@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Image as ImageIcon, Images, Music2, Pencil, RefreshCw, Star, Upload, Video } from "lucide-react";
 
-import { canvasThemes } from "@/lib/canvas-theme";
+import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -60,7 +60,7 @@ type CanvasNodeProps = {
 
 type NodeContentRendererProps = {
     node: CanvasNodeData;
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    theme: CanvasTheme;
     isEditingContent: boolean;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     isSelected: boolean;
@@ -498,7 +498,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
     );
 }
 
-function TextNodeActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick?: () => void }) {
+function TextNodeActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: CanvasTheme; onClick?: () => void }) {
     return (
         <button
             type="button"
@@ -610,7 +610,7 @@ function EmptyImageContent({ node, theme, isSelected, isBatchRoot, batchCount, b
     return content;
 }
 
-function ImageWorkflowActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick?: () => void }) {
+function ImageWorkflowActionItem({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: CanvasTheme; onClick?: () => void }) {
     return (
         <button
             type="button"
@@ -744,17 +744,20 @@ function ImageContent({
     );
 }
 
-function PanoramaBadge({ theme }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function PanoramaBadge({ theme }: { theme: CanvasTheme }) {
     return (
         <div className="pointer-events-none absolute left-3 top-3 z-30">
-            <span className="inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-semibold leading-none shadow-[0_6px_18px_rgba(15,23,42,.08)] backdrop-blur-md" style={{ background: `${theme.toolbar.panel}c9`, borderColor: `${theme.toolbar.border}aa`, color: theme.node.text }}>
+            <span
+                className="inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-semibold leading-none shadow-[0_6px_18px_rgba(15,23,42,.08)] backdrop-blur-md"
+                style={{ background: `${theme.toolbar.panel}c9`, borderColor: `${theme.toolbar.border}aa`, color: theme.node.text }}
+            >
                 全景
             </span>
         </div>
     );
 }
 
-function ImageWorkflowChip({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick?: () => void }) {
+function ImageWorkflowChip({ icon, label, theme, onClick }: { icon: ReactNode; label: string; theme: CanvasTheme; onClick?: () => void }) {
     return (
         <button
             type="button"
