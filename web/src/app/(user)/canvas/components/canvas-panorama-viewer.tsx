@@ -14,18 +14,17 @@ const VIEWER_ERROR_MESSAGE = "全景查看器加载失败，请尝试重新打�
 
 const ISOLATED_EVENTS = ["wheel", "pointerdown", "pointermove", "pointerup", "mousedown", "mousemove", "mouseup", "dblclick"] as const;
 
+function stopCanvasEvent(event: Event) {
+    event.stopPropagation();
+}
+
 export function CanvasPanoramaViewer({ src, title, readinessHint }: CanvasPanoramaViewerProps) {
     const rootRef = useRef<HTMLDivElement | null>(null);
-    const viewerRef = useRef<Viewer | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const root = rootRef.current;
         if (!root) return;
-
-        const stopCanvasEvent = (event: Event) => {
-            event.stopPropagation();
-        };
 
         ISOLATED_EVENTS.forEach((eventName) => root.addEventListener(eventName, stopCanvasEvent));
         return () => {
@@ -37,8 +36,6 @@ export function CanvasPanoramaViewer({ src, title, readinessHint }: CanvasPanora
         const root = rootRef.current;
         if (!root) return;
 
-        viewerRef.current?.destroy();
-        viewerRef.current = null;
         setError(null);
 
         if (!src) {
@@ -56,12 +53,10 @@ export function CanvasPanoramaViewer({ src, title, readinessHint }: CanvasPanora
             });
             const handlePanoramaError = () => setError(VIEWER_ERROR_MESSAGE);
             viewer.addEventListener("panorama-error", handlePanoramaError);
-            viewerRef.current = viewer;
 
             return () => {
                 viewer.removeEventListener("panorama-error", handlePanoramaError);
                 viewer.destroy();
-                if (viewerRef.current === viewer) viewerRef.current = null;
             };
         } catch {
             setError(VIEWER_ERROR_MESSAGE);

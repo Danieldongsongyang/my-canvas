@@ -968,6 +968,46 @@ function InfiniteCanvasPage() {
 
     if (!projectLoaded) return <CanvasRefreshShell />;
 
+    const previewImageUrl = previewNode?.metadata?.content;
+    const previewIsPanorama = isCanvasPanoramaEnabled(previewNode);
+    const previewModalTitle = previewIsPanorama ? "全景图片详情" : "图片详情";
+    const renderPreviewContent = () => {
+        if (!previewImageUrl || !previewNode) return null;
+
+        if (previewIsPanorama) {
+            return (
+                <CanvasPanoramaViewer
+                    src={previewImageUrl}
+                    title={previewNode.title || "全景图片"}
+                    readinessHint={canvasPanoramaReadinessHint({
+                        width: previewNode.metadata?.naturalWidth,
+                        height: previewNode.metadata?.naturalHeight,
+                    })}
+                />
+            );
+        }
+
+        return (
+            <div
+                className="flex min-h-[240px] min-w-[320px] items-center justify-center overflow-auto p-6"
+                data-canvas-no-zoom
+                onWheel={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setPreviewScale((scale) => Math.min(6, Math.max(0.2, scale * Math.exp(-event.deltaY * 0.001))));
+                }}
+                onDoubleClick={() => setPreviewScale(1)}
+            >
+                <img
+                    src={previewImageUrl}
+                    alt={previewNode.title || "图片"}
+                    draggable={false}
+                    style={{ maxWidth: "calc(100vw - 120px)", maxHeight: "80vh", objectFit: "contain", transform: `scale(${previewScale})`, transformOrigin: "center", transition: "transform 80ms ease" }}
+                />
+            </div>
+        );
+    };
+
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
             <section className="relative min-w-0 flex-1 overflow-hidden">
@@ -1395,42 +1435,15 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title={isCanvasPanoramaEnabled(previewNode) ? "全景图片详情" : "图片详情"}
-                    open={Boolean(previewNode?.metadata?.content)}
+                    title={previewModalTitle}
+                    open={Boolean(previewImageUrl)}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
                     width="auto"
                     styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh", overflow: "auto" } }}
                 >
-                    {previewNode?.metadata?.content && isCanvasPanoramaEnabled(previewNode) ? (
-                        <CanvasPanoramaViewer
-                            src={previewNode.metadata.content}
-                            title={previewNode.title || "全景图片"}
-                            readinessHint={canvasPanoramaReadinessHint({
-                                width: previewNode.metadata.naturalWidth,
-                                height: previewNode.metadata.naturalHeight,
-                            })}
-                        />
-                    ) : previewNode?.metadata?.content ? (
-                        <div
-                            className="flex min-h-[240px] min-w-[320px] items-center justify-center overflow-auto p-6"
-                            data-canvas-no-zoom
-                            onWheel={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                setPreviewScale((scale) => Math.min(6, Math.max(0.2, scale * Math.exp(-event.deltaY * 0.001))));
-                            }}
-                            onDoubleClick={() => setPreviewScale(1)}
-                        >
-                            <img
-                                src={previewNode.metadata.content}
-                                alt={previewNode.title || "图片"}
-                                draggable={false}
-                                style={{ maxWidth: "calc(100vw - 120px)", maxHeight: "80vh", objectFit: "contain", transform: `scale(${previewScale})`, transformOrigin: "center", transition: "transform 80ms ease" }}
-                            />
-                        </div>
-                    ) : null}
+                    {renderPreviewContent()}
                 </Modal>
 
                 <Modal
