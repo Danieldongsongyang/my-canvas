@@ -38,12 +38,14 @@ import { CanvasLeftMenu } from "../components/canvas-left-menu";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
+import { CanvasPanoramaViewer } from "../components/canvas-panorama-viewer";
 import { useImageNodeHandlers } from "../hooks/use-image-node-handlers";
 import { useTextNodeHandlers } from "../hooks/use-text-node-handlers";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { CanvasNodeType, type CanvasAssistantImage, type CanvasAssistantSession, type CanvasNodeData, type Position } from "../types";
 import { materializeCanvasImageMedia, type CanvasImageMediaInput } from "../services/canvas-node-media";
+import { canvasPanoramaReadinessHint, isCanvasPanoramaEnabled } from "../services/canvas-panorama-policy";
 import type { PendingConnectionCreate } from "./canvas-page-types";
 import {
     NODE_STATUS_SUCCESS,
@@ -1393,7 +1395,7 @@ function InfiniteCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title="图片详情"
+                    title={isCanvasPanoramaEnabled(previewNode) ? "全景图片详情" : "图片详情"}
                     open={Boolean(previewNode?.metadata?.content)}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
@@ -1401,7 +1403,16 @@ function InfiniteCanvasPage() {
                     width="auto"
                     styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh", overflow: "auto" } }}
                 >
-                    {previewNode?.metadata?.content ? (
+                    {previewNode?.metadata?.content && isCanvasPanoramaEnabled(previewNode) ? (
+                        <CanvasPanoramaViewer
+                            src={previewNode.metadata.content}
+                            title={previewNode.title || "全景图片"}
+                            readinessHint={canvasPanoramaReadinessHint({
+                                width: previewNode.metadata.naturalWidth,
+                                height: previewNode.metadata.naturalHeight,
+                            })}
+                        />
+                    ) : previewNode?.metadata?.content ? (
                         <div
                             className="flex min-h-[240px] min-w-[320px] items-center justify-center overflow-auto p-6"
                             data-canvas-no-zoom

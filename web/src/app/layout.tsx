@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/components/layout/app-providers";
+import "@photo-sphere-viewer/core/index.css";
 import "antd/dist/reset.css";
 import "./globals.css";
 import React from "react";
