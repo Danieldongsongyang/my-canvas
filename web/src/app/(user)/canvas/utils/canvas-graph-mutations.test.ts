@@ -251,12 +251,11 @@ describe("canvas graph mutations", () => {
     });
 
     it("copies panorama intent when a panorama batch child becomes primary", () => {
+        const root = node("root", { isBatchRoot: true, batchChildIds: ["child-a"], primaryImageId: "old", content: "old.png", naturalWidth: 100, naturalHeight: 100, freeResize: false, panorama: false });
+        const child = node("child-a", { batchRootId: "root", content: "pano.png", naturalWidth: 2048, naturalHeight: 1024, freeResize: true, panorama: true });
         const result = applyCanvasBatchPrimaryImage({
-            nodes: [
-                node("root", { isBatchRoot: true, batchChildIds: ["child-a"], primaryImageId: "old", content: "old.png", naturalWidth: 100, naturalHeight: 100, freeResize: false, panorama: false }),
-                node("child-a", { batchRootId: "root", content: "pano.png", naturalWidth: 2048, naturalHeight: 1024, freeResize: true, panorama: true }),
-            ],
-            child: node("child-a", { batchRootId: "root", content: "pano.png", naturalWidth: 2048, naturalHeight: 1024, freeResize: true, panorama: true }),
+            nodes: [root, child],
+            child,
         });
 
         expect(result[0]).toMatchObject({
@@ -274,12 +273,11 @@ describe("canvas graph mutations", () => {
     });
 
     it("copies flat image intent when a normal batch child becomes primary", () => {
+        const root = node("root", { isBatchRoot: true, batchChildIds: ["child-a"], content: "pano.png", panorama: true });
+        const child = node("child-a", { batchRootId: "root", content: "flat.png", naturalWidth: 1024, naturalHeight: 768, freeResize: false, panorama: false });
         const result = applyCanvasBatchPrimaryImage({
-            nodes: [
-                node("root", { isBatchRoot: true, batchChildIds: ["child-a"], content: "pano.png", panorama: true }),
-                node("child-a", { batchRootId: "root", content: "flat.png", naturalWidth: 1024, naturalHeight: 768, freeResize: false, panorama: false }),
-            ],
-            child: node("child-a", { batchRootId: "root", content: "flat.png", naturalWidth: 1024, naturalHeight: 768, freeResize: false, panorama: false }),
+            nodes: [root, child],
+            child,
         });
 
         expect(result[0].metadata).toMatchObject({
@@ -293,10 +291,9 @@ describe("canvas graph mutations", () => {
     });
 
     it("does not change the batch root when the selected child has no content", () => {
-        const nodes = [
-            node("root", { isBatchRoot: true, batchChildIds: ["child-a"], content: "root.png", primaryImageId: "root", naturalWidth: 100, naturalHeight: 100, panorama: true }),
-            node("child-a", { batchRootId: "root", panorama: false }),
-        ];
+        const root = node("root", { isBatchRoot: true, batchChildIds: ["child-a"], content: "root.png", primaryImageId: "root", naturalWidth: 100, naturalHeight: 100, panorama: true });
+        const child = node("child-a", { batchRootId: "root", panorama: false });
+        const nodes = [root, child];
 
         const result = applyCanvasBatchPrimaryImage({ nodes, child: nodes[1] });
 

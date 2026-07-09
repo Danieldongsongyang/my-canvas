@@ -129,8 +129,18 @@ export function completeCanvasImageGeneration(nodes: CanvasNodeData[], rootNodeI
 }
 
 export function applyCanvasBatchPrimaryImage({ nodes, child }: CanvasBatchPrimaryImageInput): CanvasNodeData[] {
-    const rootId = child.metadata?.batchRootId;
-    if (!rootId || !child.metadata?.content) return nodes;
+    const childMetadata = child.metadata;
+    if (!childMetadata?.batchRootId || !childMetadata.content) return nodes;
+
+    const rootId = childMetadata.batchRootId;
+    const rootMetadataPatch: CanvasNodeMetadata = {
+        content: childMetadata.content,
+        primaryImageId: child.id,
+        naturalWidth: childMetadata.naturalWidth,
+        naturalHeight: childMetadata.naturalHeight,
+        freeResize: childMetadata.freeResize,
+        panorama: childMetadata.panorama,
+    };
 
     return nodes.map((node) => {
         if (node.id !== rootId) return node;
@@ -138,15 +148,7 @@ export function applyCanvasBatchPrimaryImage({ nodes, child }: CanvasBatchPrimar
             ...node,
             width: child.width,
             height: child.height,
-            metadata: {
-                ...node.metadata,
-                content: child.metadata?.content,
-                primaryImageId: child.id,
-                naturalWidth: child.metadata?.naturalWidth,
-                naturalHeight: child.metadata?.naturalHeight,
-                freeResize: child.metadata?.freeResize,
-                panorama: child.metadata?.panorama,
-            },
+            metadata: { ...node.metadata, ...rootMetadataPatch },
         };
     });
 }

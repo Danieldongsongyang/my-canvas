@@ -7,7 +7,7 @@ import type { ReferenceImage } from "@/types/image";
 import { normalizeImageGenerationCount } from "@/lib/image-generation-limits";
 
 import { NODE_DEFAULT_SIZE } from "../../constants";
-import { buildCanvasPanoramaGenerationRequest, applyCanvasPanoramaMetadata, isCanvasPanoramaEnabled } from "../../services/canvas-panorama-policy";
+import { applyCanvasPanoramaMetadata, buildCanvasPanoramaGenerationRequest, isCanvasPanoramaEnabled } from "../../services/canvas-panorama-policy";
 import { fitNodeSize } from "../../utils/canvas-node-size";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "../../types";
 import { NODE_STATUS_ERROR, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS, buildImageGenerationMetadata, imageMetadata } from "../canvas-page-utils";
@@ -35,15 +35,6 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
             ? [{ id: sourceNode.id, name: `${sourceNode.title || sourceNode.id}.png`, type: sourceNode.metadata.mimeType || "image/png", dataUrl: sourceNode.metadata.content, storageKey: sourceNode.metadata.storageKey }]
             : [];
     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
-    const generationRequest = buildCanvasPanoramaGenerationRequest({
-        prompt: effectivePrompt,
-        generationConfig,
-        enabled: isCanvasPanoramaEnabled(sourceNode),
-    });
-    const { prompt: generationPrompt, generationConfig: finalGenerationConfig, panorama } = generationRequest;
-    const count = normalizeImageGenerationCount(finalGenerationConfig.count, finalGenerationConfig.model || finalGenerationConfig.imageModel);
-    const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
-    const generationMetadata = buildImageGenerationMetadata(generationType, finalGenerationConfig, count, referenceImages);
 
     if (!isConfigNode && !isImageNode) {
         const result = await generateCanvasTextToImage({
@@ -75,6 +66,16 @@ export async function generateCanvasImage(params: CanvasGenerateBranchParams, de
         if (result.hasFailure) message.error(result.hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
         return;
     }
+
+    const generationRequest = buildCanvasPanoramaGenerationRequest({
+        prompt: effectivePrompt,
+        generationConfig,
+        enabled: isCanvasPanoramaEnabled(sourceNode),
+    });
+    const { prompt: generationPrompt, generationConfig: finalGenerationConfig, panorama } = generationRequest;
+    const count = normalizeImageGenerationCount(finalGenerationConfig.count, finalGenerationConfig.model || finalGenerationConfig.imageModel);
+    const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
+    const generationMetadata = buildImageGenerationMetadata(generationType, finalGenerationConfig, count, referenceImages);
 
     const parentConfig = NODE_DEFAULT_SIZE[parentNodeTypeForImageGeneration(isConfigNode, isImageNode)];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];

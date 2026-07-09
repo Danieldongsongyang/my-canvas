@@ -98,7 +98,7 @@ async function generateFromSource(sourceNode: CanvasNodeData, count = "1") {
     return { nodes: getNodes(), connections: getConnections(), setPendingChildIds, addAsset };
 }
 
-describe("canvas image generation hook branch", () => {
+describe("generateCanvasImage panorama support", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
