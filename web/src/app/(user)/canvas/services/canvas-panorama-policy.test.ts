@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { defaultConfig } from "@/stores/use-config-store";
 
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
-import { applyCanvasPanoramaGenerationConfig, applyCanvasPanoramaMetadata, buildCanvasPanoramaPrompt, canvasPanoramaReadinessHint, isCanvasPanoramaEnabled } from "./canvas-panorama-policy";
+import { applyCanvasPanoramaGenerationConfig, applyCanvasPanoramaMetadata, buildCanvasPanoramaGenerationRequest, buildCanvasPanoramaPrompt, canvasPanoramaReadinessHint, isCanvasPanoramaEnabled } from "./canvas-panorama-policy";
 
 function node(metadata?: CanvasNodeMetadata): CanvasNodeData {
     return {
@@ -47,6 +47,22 @@ describe("canvas panorama policy", () => {
         expect(result).toEqual(expect.objectContaining({ model: "image-model", size: "2:1", count: "2" }));
         expect(config.size).toBe("1:1");
         expect(applyCanvasPanoramaGenerationConfig(config, false)).toBe(config);
+    });
+
+    it("builds the panorama generation request from the final prompt, config, and enabled flag", () => {
+        const config = { ...defaultConfig, model: "image-model", size: "1:1", count: "2" };
+        const request = buildCanvasPanoramaGenerationRequest({
+            prompt: "雨夜街角便利店",
+            generationConfig: config,
+            enabled: true,
+        });
+
+        expect(request).toMatchObject({
+            prompt: expect.stringContaining("等距矩形 360 全景图"),
+            generationConfig: expect.objectContaining({ model: "image-model", size: "2:1", count: "2" }),
+            panorama: true,
+        });
+        expect(config.size).toBe("1:1");
     });
 
     it("writes explicit true and false panorama metadata", () => {

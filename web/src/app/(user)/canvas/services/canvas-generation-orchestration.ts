@@ -13,7 +13,7 @@ import { fitNodeSize } from "../utils/canvas-node-size";
 import { buildImageGenerationMetadata, imageMetadata, NODE_STATUS_LOADING, NODE_STATUS_SUCCESS } from "../[id]/canvas-page-utils";
 import { registerCanvasGeneratedImageAsset, type CanvasAssetCreator, type CanvasGeneratedImageAssetMetadataPatch } from "./canvas-asset-intake";
 import { materializeCanvasImageMedia, type CanvasNodeMediaAdapter } from "./canvas-node-media";
-import { applyCanvasPanoramaGenerationConfig, applyCanvasPanoramaMetadata, buildCanvasPanoramaPrompt, isCanvasPanoramaEnabled } from "./canvas-panorama-policy";
+import { applyCanvasPanoramaMetadata, buildCanvasPanoramaGenerationRequest, isCanvasPanoramaEnabled } from "./canvas-panorama-policy";
 
 export type CanvasImageGenerationRequester = {
     generate: (config: AiConfig, prompt: string) => Promise<Array<{ dataUrl: string }>>;
@@ -86,6 +86,25 @@ type CanvasGeneratedImageAssetPatchInput = {
     batchId?: string;
 };
 
+type BaseGeneratedImageNodeParams = {
+    id: string;
+    prompt: string;
+    generationConfig: AiConfig;
+    referenceImages: ReferenceImage[];
+    panorama: boolean;
+};
+
+type RootGeneratedImageNodeParams = BaseGeneratedImageNodeParams & {
+    sourceNode?: CanvasNodeData;
+    count: number;
+    childNodeIds: string[];
+};
+
+type ChildGeneratedImageNodeParams = BaseGeneratedImageNodeParams & {
+    index: number;
+    rootNode: CanvasNodeData;
+};
+
 const defaultCanvasImageGenerationRequester: CanvasImageGenerationRequester = {
     generate: requestGeneration,
     edit: requestEdit,
@@ -99,9 +118,12 @@ const BATCH_CHILD_GAP = 36;
 export async function generateCanvasTextToImage(input: CanvasTextToImageGenerationInput): Promise<CanvasTextToImageGenerationResult> {
     const requester = input.requester || defaultCanvasImageGenerationRequester;
     const sourceNode = input.nodes.find((node) => node.id === input.sourceNodeId);
-    const panoramaEnabled = isCanvasPanoramaEnabled(sourceNode);
-    const effectivePrompt = buildCanvasPanoramaPrompt(input.effectivePrompt, panoramaEnabled);
-    const generationConfig = applyCanvasPanoramaGenerationConfig(input.generationConfig, panoramaEnabled);
+    const generationRequest = buildCanvasPanoramaGenerationRequest({
+        prompt: input.effectivePrompt,
+        generationConfig: input.generationConfig,
+        enabled: isCanvasPanoramaEnabled(sourceNode),
+    });
+    const { prompt: generationPrompt, generationConfig, panorama } = generationRequest;
     const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const count = normalizeImageGenerationCount(generationConfig.count, generationConfig.model || generationConfig.imageModel);
@@ -111,22 +133,22 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
     const rootNode = createRootImageNode({
         id: rootNodeId,
         sourceNode,
-        prompt: effectivePrompt,
+        prompt: generationPrompt,
         count,
         childNodeIds,
         referenceImages: input.referenceImages,
         generationConfig,
-        panorama: panoramaEnabled,
+        panorama,
     });
     const childNodes = childNodeIds.map((id, index) =>
         createChildImageNode({
             id,
             index,
             rootNode,
-            prompt: effectivePrompt,
+            prompt: generationPrompt,
             generationConfig,
             referenceImages: input.referenceImages,
-            panorama: panoramaEnabled,
+            panorama,
         }),
     );
     const generationStart = applyCanvasImageGenerationStart({
@@ -164,7 +186,7 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
     await Promise.all(
         targetNodeIds.map(async (targetNodeId) => {
             try {
-                const image = await requestOneImage({ requester, config: generationConfig, prompt: effectivePrompt, referenceImages: input.referenceImages });
+                const image = await requestOneImage({ requester, config: generationConfig, prompt: generationPrompt, referenceImages: input.referenceImages });
                 const uploaded = await materializeCanvasImageMedia({ dataUrl: image.dataUrl }, input.mediaAdapter);
                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                 const assetMetadataPatch = registerGeneratedImageAssetPatch({
@@ -173,7 +195,7 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
                     nodeId: targetNodeId,
                     rootNodeId,
                     sourceNodeId: input.sourceNodeId,
-                    prompt: effectivePrompt,
+                    prompt: generationPrompt,
                     generationConfig,
                     batchId: count > 1 ? rootNodeId : undefined,
                 });
@@ -183,7 +205,7 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
                     targetNodeId,
                     width: imageSize.width,
                     height: imageSize.height,
-                    metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploaded), ...assetMetadataPatch }, panoramaEnabled),
+                    metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploaded), ...assetMetadataPatch }, panorama),
                 });
                 hasSuccess = true;
             } catch (error) {
@@ -209,21 +231,24 @@ export async function generateCanvasTextToImage(input: CanvasTextToImageGenerati
 
 export async function retryCanvasGeneratedImage(input: CanvasGeneratedImageRetryInput): Promise<CanvasNodeData[]> {
     const requester = input.requester || defaultCanvasImageGenerationRequester;
-    const panoramaEnabled = input.savedImageMetadata?.panorama === true || isCanvasPanoramaEnabled(input.node);
-    const prompt = buildCanvasPanoramaPrompt(input.prompt, panoramaEnabled);
-    const generationConfig = applyCanvasPanoramaGenerationConfig(input.generationConfig, panoramaEnabled);
-    const image = await requestOneImage({ requester, config: generationConfig, prompt, referenceImages: input.useReferenceImages ? input.retryImages : [] });
+    const generationRequest = buildCanvasPanoramaGenerationRequest({
+        prompt: input.prompt,
+        generationConfig: input.generationConfig,
+        enabled: isRetryPanoramaEnabled(input),
+    });
+    const { prompt: generationPrompt, generationConfig, panorama } = generationRequest;
+    const image = await requestOneImage({ requester, config: generationConfig, prompt: generationPrompt, referenceImages: input.useReferenceImages ? input.retryImages : [] });
     const uploadedImage = await materializeCanvasImageMedia({ dataUrl: image.dataUrl }, input.mediaAdapter);
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
-    const generationMetadata = retryGenerationMetadata({ ...input, prompt, generationConfig });
+    const generationMetadata = retryGenerationMetadata({ ...input, prompt: generationPrompt, generationConfig });
     const rootNodeId = input.node.metadata?.batchRootId || input.node.id;
     const assetMetadataPatch = registerGeneratedImageAssetPatch({
         assetIntake: input.assetIntake,
         media: uploadedImage,
         nodeId: input.node.id,
         rootNodeId,
-        prompt,
+        prompt: generationPrompt,
         generationConfig,
     });
 
@@ -233,7 +258,7 @@ export async function retryCanvasGeneratedImage(input: CanvasGeneratedImageRetry
         targetNodeId: input.node.id,
         width: imageSize.width,
         height: imageSize.height,
-        metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploadedImage), prompt, ...generationMetadata, ...assetMetadataPatch }, panoramaEnabled),
+        metadata: applyCanvasPanoramaMetadata({ ...imageMetadata(uploadedImage), prompt: generationPrompt, ...generationMetadata, ...assetMetadataPatch }, panorama),
     });
 }
 
@@ -258,7 +283,7 @@ function registerGeneratedImageAssetPatch(input: CanvasGeneratedImageAssetPatchI
     }).metadataPatch;
 }
 
-function createRootImageNode(params: { id: string; sourceNode?: CanvasNodeData; prompt: string; count: number; childNodeIds: string[]; generationConfig: AiConfig; referenceImages: ReferenceImage[]; panorama: boolean }): CanvasNodeData {
+function createRootImageNode(params: RootGeneratedImageNodeParams): CanvasNodeData {
     const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const sourcePosition = params.sourceNode?.position || { x: 0, y: 0 };
@@ -288,7 +313,7 @@ function createRootImageNode(params: { id: string; sourceNode?: CanvasNodeData; 
     };
 }
 
-function createChildImageNode(params: { id: string; index: number; rootNode: CanvasNodeData; prompt: string; generationConfig: AiConfig; referenceImages: ReferenceImage[]; panorama: boolean }): CanvasNodeData {
+function createChildImageNode(params: ChildGeneratedImageNodeParams): CanvasNodeData {
     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
 
     return {
@@ -333,6 +358,10 @@ function retryGenerationMetadata(input: CanvasGeneratedImageRetryInput): CanvasN
     }
 
     return buildImageGenerationMetadata(input.useReferenceImages ? "edit" : "generation", input.generationConfig, 1, input.retryImages);
+}
+
+function isRetryPanoramaEnabled(input: Pick<CanvasGeneratedImageRetryInput, "node" | "savedImageMetadata">) {
+    return input.savedImageMetadata?.panorama === true || isCanvasPanoramaEnabled(input.node);
 }
 
 function createBatchChildNodeIds(count: number, createId?: () => string) {
